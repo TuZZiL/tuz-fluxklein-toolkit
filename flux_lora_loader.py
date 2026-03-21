@@ -624,14 +624,97 @@ class FluxLoraStack(FluxLoraLoader):
         return (current,)
 
 
+# ── Quad Loader ───────────────────────────────────────────────────────────────
+
+_QUAD_SLOTS = 4
+
+class FluxLoraQuad(FluxLoraLoader):
+    """
+    Apply up to 4 FLUX LoRAs with independent edit_mode and balance per slot.
+    Designed for editing workflows where different LoRAs need different protection.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        loras = ["None"] + folder_paths.get_filename_list("loras")
+        optional = {}
+        for i in range(1, _QUAD_SLOTS + 1):
+            optional[f"lora_{i}"]      = (loras,)
+            optional[f"strength_{i}"]  = ("FLOAT", {
+                "default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01,
+            })
+            optional[f"edit_mode_{i}"] = (PRESET_NAMES, {
+                "default": "None",
+                "tooltip": f"Edit preset for LoRA slot {i}.",
+            })
+            optional[f"balance_{i}"]   = ("FLOAT", {
+                "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                "tooltip": "0.0 = full preset, 1.0 = standard LoRA.",
+            })
+            optional[f"enabled_{i}"]   = ("BOOLEAN", {
+                "default": True, "label_on": "On", "label_off": "Off",
+            })
+            optional[f"convert_{i}"]   = ("BOOLEAN", {
+                "default": True, "label_on": "Auto-convert", "label_off": "Direct",
+            })
+        return {
+            "required": {"model": ("MODEL",)},
+            "optional": optional,
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_loras"
+    CATEGORY = "loaders/FLUX"
+    TITLE = "FLUX LoRA Quad"
+
+    def load_loras(self, model, **kwargs):
+        key_map = self._build_key_map(model)
+        current = model
+
+        for i in range(1, _QUAD_SLOTS + 1):
+            name      = kwargs.get(f"lora_{i}",      "None")
+            strength  = kwargs.get(f"strength_{i}",  1.0)
+            edit_mode = kwargs.get(f"edit_mode_{i}", "None")
+            balance   = kwargs.get(f"balance_{i}",   0.5)
+            enabled   = kwargs.get(f"enabled_{i}",   True)
+            convert   = kwargs.get(f"convert_{i}",   True)
+
+            if not enabled or name == "None" or strength == 0:
+                continue
+
+            lora_path = folder_paths.get_full_path("loras", name)
+            lora_sd   = comfy.utils.load_torch_file(lora_path, safe_load=True)
+            logger.info(f"[FLUX LoRA Quad] Slot {i}: {name}  ({len(lora_sd)} keys)")
+
+            if convert and self._is_diffusers_format(lora_sd):
+                lora_sd = self._convert_to_native(lora_sd)
+
+            # Per-slot edit-mode
+            if edit_mode != "None":
+                preset_raw = EDIT_PRESETS.get(edit_mode)
+                if preset_raw is not None:
+                    preset_cfg = interpolate_preset(preset_raw, balance)
+                    lora_sd = self._apply_edit_multipliers(lora_sd, preset_cfg)
+                    logger.info(f"[FLUX LoRA Quad] Slot {i}: edit_mode='{edit_mode}' balance={balance:.2f}")
+
+            patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
+            next_model = current.clone()
+            next_model.add_patches(patch_dict, strength_patch=strength, strength_model=1.0)
+            current = next_model
+
+        return (current,)
+
+
 # ── Exports ───────────────────────────────────────────────────────────────────
 
 NODE_CLASS_MAPPINGS = {
     "FluxLoraLoader": FluxLoraLoader,
     "FluxLoraStack":  FluxLoraStack,
+    "FluxLoraQuad":   FluxLoraQuad,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxLoraLoader": "FLUX LoRA Loader",
     "FluxLoraStack":  "FLUX LoRA Stack",
+    "FluxLoraQuad":   "FLUX LoRA Quad",
 }
