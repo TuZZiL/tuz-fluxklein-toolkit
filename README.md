@@ -14,7 +14,9 @@ Architecture-aware LoRA loading for **FLUX.2 Klein** (9B) in ComfyUI, with autom
 - **Edit-mode presets**: Preserve face, body, or style during LoRA-based image editing
 - **Auto mode**: Analyzes LoRA weight norms and automatically selects the best preset
 - **Per-slot control**: FluxLoraQuad node with independent edit_mode per LoRA
+- **Strength scheduling**: FluxLoraScheduled node varies LoRA strength across sampling steps
 - **GGUF compatible**: Works with ComfyUI-GGUF quantized models
+- **Example workflow**: Ready-to-use Klein 9B editing workflow included
 
 ## Background
 
@@ -79,6 +81,47 @@ Reads the LoRA's weight tensors directly and computes per-layer strengths from t
 ### FLUX LoRA Auto Loader
 
 Self-contained version of the above — analysis and application in one node. `model` in, patched `model` out.
+
+### FLUX LoRA Scheduled
+
+**Per-step LoRA strength control** using ComfyUI's native Hook Keyframes system. Instead of constant strength, the LoRA effect varies across sampling steps.
+
+| Input | Type | Description |
+|---|---|---|
+| `model` | MODEL | FLUX.2 Klein model |
+| `lora_name` | dropdown | LoRA file |
+| `strength` | float | Base LoRA strength (0.0 to 2.0) |
+| `schedule` | dropdown | Strength curve profile |
+| `edit_mode` | dropdown | Semantic edit preset (supports Auto) |
+| `balance` | float | Preset balance (0.0 to 1.0) |
+| `keyframes` | int | Number of keyframes (2-10, default 5) |
+
+**Returns:** `MODEL` + `HOOKS`. The HOOKS output must be connected to conditioning via the **FLUX Set Cond Hooks** node.
+
+Available schedules:
+
+| Schedule | Curve | Use case |
+|---|---|---|
+| **Constant** | `1.0 → 1.0 → 1.0 → 1.0` | Standard behavior (no scheduling) |
+| **Fade Out** | `1.0 → 0.7 → 0.3 → 0.0` | Editing: apply changes early, restore reference details late |
+| **Fade In** | `0.0 → 0.3 → 0.7 → 1.0` | Detailing: preserve reference first, add LoRA effect last |
+| **Strong Start** | `1.0 → 0.5 → 0.2 → 0.0` | Aggressive fade-out for maximum reference preservation |
+| **Pulse** | `0.3 → 1.0 → 1.0 → 0.3` | Peak effect in mid steps |
+
+### FLUX Set Cond Hooks
+
+Utility node that attaches HOOKS (from FluxLoraScheduled) to conditioning. **Required** for per-step scheduling to work.
+
+```
+FluxLoraScheduled → MODEL → CFGGuider
+                  → HOOKS → FluxSetCondHooks → conditioning → ReferenceLatent → CFGGuider
+```
+
+## Example Workflow
+
+An example workflow file `workflow_scheduled_lora.json` is included. Load it in ComfyUI via drag & drop or File → Load.
+
+The workflow uses: UnetLoaderGGUF → FluxLoraScheduled (Fade Out + Auto edit_mode) → FluxSetCondHooks → ReferenceLatent → CFGGuider → SamplerCustomAdvanced.
 
 ## Edit Mode Presets
 

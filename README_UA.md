@@ -14,7 +14,9 @@
 - **Пресети редагування**: Збереження обличчя, тіла або стилю при редагуванні через LoRA
 - **Auto режим**: Аналізує ваги LoRA і автоматично обирає найкращий пресет
 - **Per-slot контроль**: FluxLoraQuad нода з незалежним edit_mode для кожної LoRA
+- **Scheduling по кроках**: FluxLoraScheduled змінює силу LoRA протягом sampling steps
 - **GGUF сумісність**: Працює з квантованими моделями через ComfyUI-GGUF
+- **Готовий workflow**: Включено приклад робочого процесу для Klein 9B editing
 
 ## Передумови
 
@@ -77,6 +79,47 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 ### FLUX LoRA Auto Loader
 
 Самодостатня версія — аналіз і застосування в одній ноді. `model` на вхід, пропатчена `model` на вихід.
+
+### FLUX LoRA Scheduled
+
+**Per-step контроль сили LoRA** через вбудовану систему Hook Keyframes ComfyUI. Замість постійної сили, ефект LoRA змінюється протягом кроків sampling.
+
+| Вхід | Тип | Опис |
+|---|---|---|
+| `model` | MODEL | Модель FLUX.2 Klein |
+| `lora_name` | dropdown | Файл LoRA |
+| `strength` | float | Базова сила LoRA (0.0–2.0) |
+| `schedule` | dropdown | Профіль кривої сили |
+| `edit_mode` | dropdown | Пресет редагування (підтримує Auto) |
+| `balance` | float | Баланс пресету (0.0–1.0) |
+| `keyframes` | int | Кількість keyframes (2-10, за замовч. 5) |
+
+**Повертає:** `MODEL` + `HOOKS`. Вихід HOOKS потрібно з'єднати з conditioning через ноду **FLUX Set Cond Hooks**.
+
+Доступні розклади:
+
+| Розклад | Крива | Коли використовувати |
+|---|---|---|
+| **Constant** | `1.0 → 1.0 → 1.0 → 1.0` | Стандартна поведінка (без scheduling) |
+| **Fade Out** | `1.0 → 0.7 → 0.3 → 0.0` | Editing: зміни на початку, відновлення reference в кінці |
+| **Fade In** | `0.0 → 0.3 → 0.7 → 1.0` | Деталізація: спочатку reference, потім LoRA |
+| **Strong Start** | `1.0 → 0.5 → 0.2 → 0.0` | Агресивний fade-out для максимального збереження |
+| **Pulse** | `0.3 → 1.0 → 1.0 → 0.3` | Піковий ефект в середніх кроках |
+
+### FLUX Set Cond Hooks
+
+Утилітна нода — прикріплює HOOKS (від FluxLoraScheduled) до conditioning. **Обов'язкова** для роботи per-step scheduling.
+
+```
+FluxLoraScheduled → MODEL → CFGGuider
+                  → HOOKS → FluxSetCondHooks → conditioning → ReferenceLatent → CFGGuider
+```
+
+## Приклад робочого процесу
+
+Файл `workflow_scheduled_lora.json` — готовий workflow для Klein 9B editing. Завантажте в ComfyUI через drag & drop або File → Load.
+
+Workflow використовує: UnetLoaderGGUF → FluxLoraScheduled (Fade Out + Auto edit_mode) → FluxSetCondHooks → ReferenceLatent → CFGGuider → SamplerCustomAdvanced.
 
 ## Пресети редагування
 
