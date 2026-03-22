@@ -56,7 +56,8 @@ async function getLoraList() {
 function hideWidget(node, widget) {
     if (!widget) return;
     widget.type = "hidden_flux_multi";
-    widget.computeSize = () => [0, -4];
+    widget.computeSize = () => [0, 0];
+    widget.draw = () => {};
 }
 
 function makeDivider() {

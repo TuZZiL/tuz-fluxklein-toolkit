@@ -60,7 +60,8 @@ function roundRect(ctx, x, y, w, h, r) {
 function hideWidget(node, widget) {
     if (!widget) return;
     widget.type        = "hidden_flux_lora";
-    widget.computeSize = () => [0, -4];
+    widget.computeSize = () => [0, 0];
+    widget.draw        = () => {};
 }
 
 function defaultStrengths() {
