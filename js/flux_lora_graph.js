@@ -59,9 +59,14 @@ function roundRect(ctx, x, y, w, h, r) {
 
 function hideWidget(node, widget) {
     if (!widget) return;
-    widget.type        = "hidden_flux_lora";
+    if (!widget.origType) widget.origType = widget.type;
+    const originalSerialize = widget.serializeValue?.bind(widget);
+    widget.type        = "converted-widget";
+    widget.hidden      = true;
     widget.computeSize = () => [0, -4];
     widget.draw        = () => {};
+    widget.mouse       = () => false;
+    widget.serializeValue = () => originalSerialize ? originalSerialize() : widget.value;
 }
 
 function defaultStrengths() {

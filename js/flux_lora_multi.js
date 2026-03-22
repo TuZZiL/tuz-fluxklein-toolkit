@@ -55,9 +55,14 @@ async function getLoraList() {
 
 function hideWidget(node, widget) {
     if (!widget) return;
-    widget.type = "hidden_flux_multi";
+    if (!widget.origType) widget.origType = widget.type;
+    const originalSerialize = widget.serializeValue?.bind(widget);
+    widget.type = "converted-widget";
+    widget.hidden = true;
     widget.computeSize = () => [0, -4];
     widget.draw = () => {};
+    widget.mouse = () => false;
+    widget.serializeValue = () => originalSerialize ? originalSerialize() : widget.value;
 }
 
 function makeDivider() {
@@ -123,9 +128,11 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = async function () {
             const result = _onNodeCreated?.apply(this, arguments);
             const node = this;
+            const W = (name) => node.widgets?.find(widget => widget.name === name);
 
             node._slots = [];
             node._slotWidgets = [];
+            hideWidget(node, W("slot_data"));
             node._loraList = await getLoraList();
 
             function syncSlotData() {
@@ -358,8 +365,7 @@ app.registerExtension({
             }
 
             setTimeout(() => {
-                const w = node.widgets?.find(widget => widget.name === "slot_data");
-                if (w) hideWidget(node, w);
+                hideWidget(node, W("slot_data"));
                 node.setSize(node.computeSize());
                 node.setDirtyCanvas(true, true);
             }, 0);
