@@ -117,6 +117,12 @@ function moveWidgetTo(node, widget, index) {
     node.widgets.splice(index, 0, widget);
 }
 
+function snapToStep(value, step, min = -Infinity, max = Infinity) {
+    const snapped = Math.round(Number(value) / step) * step;
+    const clamped = Math.max(min, Math.min(max, snapped));
+    return Number(clamped.toFixed(2));
+}
+
 app.registerExtension({
     name: "Comfy.FluxLoraMulti",
 
@@ -134,6 +140,12 @@ app.registerExtension({
             node._slotWidgets = [];
             hideWidget(node, W("slot_data"));
             node._loraList = await getLoraList();
+
+            function refreshNodeSize() {
+                const currentWidth = Math.max(node.size?.[0] ?? 0, MIN_WIDTH);
+                const [, computedHeight] = node.computeSize();
+                node.setSize([currentWidth, computedHeight]);
+            }
 
             function syncSlotData() {
                 const w = node.widgets?.find(widget => widget.name === "slot_data");
@@ -302,7 +314,7 @@ app.registerExtension({
                         group.push(loraW);
 
                         const strengthW = node.addWidget("number", "Strength", data.strength, (v) => {
-                            data.strength = v;
+                            data.strength = Number(v);
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
                         }, {
@@ -341,7 +353,9 @@ app.registerExtension({
                         group.push(editW);
 
                         const balanceW = node.addWidget("number", "Balance", data.balance, (v) => {
-                            data.balance = v;
+                            const snapped = snapToStep(v, 0.05, 0.0, 1.0);
+                            data.balance = snapped;
+                            balanceW.value = snapped;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
                         }, {
@@ -360,13 +374,13 @@ app.registerExtension({
                 }
 
                 syncSlotData();
-                node.setSize(node.computeSize());
+                refreshNodeSize();
                 node.setDirtyCanvas(true, true);
             }
 
             setTimeout(() => {
                 hideWidget(node, W("slot_data"));
-                node.setSize(node.computeSize());
+                refreshNodeSize();
                 node.setDirtyCanvas(true, true);
             }, 0);
 
@@ -381,7 +395,7 @@ app.registerExtension({
 
             const MIN_WIDTH = 360;
             if (node.size[0] < MIN_WIDTH) node.size[0] = MIN_WIDTH;
-            node.setSize(node.computeSize());
+            refreshNodeSize();
 
             const origConfigure = node.onConfigure?.bind(node);
             node.onConfigure = function (config) {
