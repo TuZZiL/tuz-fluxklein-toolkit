@@ -98,8 +98,8 @@ app.registerExtension({
             for (let i = 0; i < N_SINGLE; i++) lastSb[i] = 1.0;
 
             // ── Auto-strength live watcher ─────────────────────────────────────
-            // Intercepts the layer_strengths widget callback so that when
-            // FluxLoraAutoStrength pushes computed JSON via a node link,
+            // Intercepts the layer_strengths widget value setter so that when
+            // auto_strength computes per-layer JSON or the value changes,
             // the bars update immediately without any manual interaction.
             function applyStrengthJSON(value) {
                 try {
@@ -185,7 +185,7 @@ app.registerExtension({
             }
 
             function globalStrength() {
-                return W("strength_model")?.value ?? 1.0;
+                return W("strength")?.value ?? 1.0;
             }
 
             function hitTest(mx, my, gX, gW, gY, gH) {
@@ -601,68 +601,6 @@ app.registerExtension({
                 }, 0);
             };
 
-            // ── Gray out lora_name dropdown when lora_name_override is linked ──
-            const _origDraw = nodeType.prototype.onDrawBackground?.bind(nodeType.prototype);
-            const _checkOverride = function() {
-                const loraWidget     = W("lora_name");
-                const overrideWidget = W("lora_name_override");
-                if (!loraWidget) return;
-
-                // Check if lora_name_override input has a link
-                const overrideInput = node.inputs?.find(inp => inp.name === "lora_name_override");
-                const isLinked = overrideInput?.link != null;
-
-                if (isLinked) {
-                    loraWidget.disabled  = true;
-                    loraWidget._origType = loraWidget._origType || loraWidget.type;
-                    // Force ComfyUI to render it grayed
-                    loraWidget.computeSize = () => [0, 22];
-                    if (!node._overrideBannerShown) {
-                        node._overrideBannerShown = true;
-                    }
-                } else {
-                    loraWidget.disabled = false;
-                    delete node._overrideBannerShown;
-                }
-                node.setDirtyCanvas(true, false);
-            };
-
-            // Patch onConnectionsChange to react when override link is added/removed
-            const _origConnChange = nodeType.prototype.onConnectionsChange?.bind(nodeType.prototype);
-            nodeType.prototype.onConnectionsChange = function(type, index, connected, link_info) {
-                _origConnChange?.(type, index, connected, link_info);
-                _checkOverride();
-            };
-
-            // Also run on draw so it stays correct on workflow load
-            const _origDrawFG = nodeType.prototype.onDrawForeground?.bind(nodeType.prototype);
-            nodeType.prototype.onDrawForeground = function(ctx) {
-                _origDrawFG?.(ctx);
-
-                const overrideInput = this.inputs?.find(inp => inp.name === "lora_name_override");
-                const isLinked = overrideInput?.link != null;
-                const loraWidget = this.widgets?.find(w => w.name === "lora_name");
-
-                if (loraWidget && isLinked) {
-                    // Draw a gray overlay bar over the lora_name widget area
-                    const wY = loraWidget.last_y ?? 0;
-                    const wW = this.size[0] - 20;
-                    ctx.save();
-                    ctx.fillStyle   = "rgba(20, 20, 30, 0.75)";
-                    ctx.strokeStyle = "#3a3a5a";
-                    ctx.lineWidth   = 1;
-                    ctx.beginPath();
-                    ctx.roundRect(10, wY, wW, 22, 4);
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.fillStyle = "#555577";
-                    ctx.font      = "12px monospace";
-                    ctx.textAlign = "center";
-                    ctx.fillText("⟵ overridden by link", this.size[0] / 2, wY + 15);
-                    ctx.restore();
-                }
-            };
-            // ─────────────────────────────────────────────────────────────────
 
             return result;
         };

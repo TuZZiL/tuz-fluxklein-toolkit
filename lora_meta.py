@@ -484,7 +484,7 @@ if __name__ == "__main__":
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NODE API  — called by flux_lora_auto_strength.py
+# NODE API  — called by flux_lora_loader.py
 # Returns structured per-layer ΔW data ready for strength computation.
 # ─────────────────────────────────────────────────────────────────────────────
 

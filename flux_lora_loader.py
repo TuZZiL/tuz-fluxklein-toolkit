@@ -1,5 +1,11 @@
 """
-FLUX LoRA Loader
+FLUX LoRA Loader — Consolidated node pack (3 nodes).
+
+Nodes:
+  FluxLoraLoader    — Single LoRA with interactive graph widget + auto-strength toggle
+  FluxLoraMulti     — Dynamic multi-slot loader (rgthree-style "+ Add LoRA")
+  FluxLoraScheduled — Per-step temporal scheduling, absorbs SetCondHooks
+
 Architecture-aware LoRA loading for FLUX DiT (double_blocks / single_blocks).
 
 Problem it solves:
@@ -39,6 +45,7 @@ What it does:
 import json
 import re
 import torch
+import numpy as np
 import comfy.utils
 import comfy.lora
 import folder_paths
@@ -51,8 +58,333 @@ logger = logging.getLogger(__name__)
 
 N_DOUBLE = 8
 N_SINGLE = 24
-_MAX_SLOTS = 10
+_AUTO_FLOOR   = 0.30
+_AUTO_CEILING = 1.50
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SHARED HELPERS  (module-level, used by all 3 nodes)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ── Format detection ──────────────────────────────────────────────────────────
+
+def _is_diffusers_format(lora_sd):
+    markers = (
+        ".to_q.",               # separate Q proj
+        ".to_k.",               # separate K proj
+        ".to_v.",               # separate V proj
+        ".add_q_proj.",         # FLUX txt Q
+        ".add_k_proj.",         # FLUX txt K
+        ".add_v_proj.",         # FLUX txt V
+        "transformer_blocks.",  # diffusers double-block prefix
+        "single_transformer_blocks.",  # diffusers single-block prefix
+        ".ff.net.",             # diffusers FFN naming
+        ".ff_context.",         # FLUX txt FFN
+        ".to_add_out.",         # FLUX txt out proj
+        ".proj_mlp.",           # FLUX single block mlp gate
+        ".to_qkv_mlp_proj.",    # Musubi Tuner fused single block
+        ".ff.linear_in.",       # Musubi Tuner FFN naming
+        ".ff.linear_out.",      # Musubi Tuner FFN naming
+    )
+    return any(m in k for k in lora_sd for m in markers)
+
+
+# ── Key normalization ─────────────────────────────────────────────────────────
+
+def _normalize_keys(lora_sd):
+    """Strip prefix variations and remap diffusers layer names to native."""
+    out = {}
+    for key, val in lora_sd.items():
+        k = key
+        for pfx in ("transformer.", "diffusion_model.", "unet."):
+            if k.startswith(pfx):
+                k = k[len(pfx):]
+                break
+        k = re.sub(r'^transformer_blocks\.',        'double_blocks.', k)
+        k = re.sub(r'^single_transformer_blocks\.', 'single_blocks.', k)
+        k = k.replace(".lora_down.", ".lora_A.").replace(".lora_up.", ".lora_B.")
+        k = k.replace(".lora_A.default.", ".lora_A.").replace(".lora_B.default.", ".lora_B.")
+        k = k.replace(".ff.linear_in.", ".ff.net.0.proj.")
+        k = k.replace(".ff.linear_out.", ".ff.net.2.")
+        k = k.replace(".ff_context.linear_in.", ".ff_context.net.0.proj.")
+        k = k.replace(".ff_context.linear_out.", ".ff_context.net.2.")
+        out[k] = val
+    return out
+
+
+def _alpha_scale(norm, base):
+    """Return alpha/rank for one LoRA component (defaults to 1.0 if absent)."""
+    down_key  = f"{base}.lora_A.weight"
+    alpha_key = f"{base}.alpha"
+    if alpha_key in norm and down_key in norm:
+        rank = norm[down_key].shape[0]
+        if rank > 0:
+            return float(norm[alpha_key]) / rank
+    return 1.0
+
+
+# ── QKV / linear1 fusion ─────────────────────────────────────────────────────
+
+def _fuse_qkv(norm, out, done, q, k, v, dst):
+    """
+    Fuse three separate LoRAs (Q, K, V) into one block-diagonal LoRA.
+
+    ΔW_qkv = [B_q@A_q ; B_k@A_k ; B_v@A_v]
+
+    Represented as:
+      A_fused = [A_q ; A_k ; A_v]              shape [3r, in]
+      B_fused = block_diag(B_q, B_k, B_v)      shape [3·out, 3r]
+    """
+    keys_A = [f"{b}.lora_A.weight" for b in (q, k, v)]
+    keys_B = [f"{b}.lora_B.weight" for b in (q, k, v)]
+
+    if not all(kk in norm for kk in keys_A + keys_B):
+        return
+
+    A_q, A_k, A_v = [norm[kk] for kk in keys_A]
+    B_q, B_k, B_v = (norm[kk] * _alpha_scale(norm, b)
+                      for kk, b in zip(keys_B, (q, k, v)))
+
+    r_q, r_k, r_v   = A_q.shape[0], A_k.shape[0], A_v.shape[0]
+    o_q, o_k, o_v   = B_q.shape[0], B_k.shape[0], B_v.shape[0]
+    r_total = r_q + r_k + r_v
+    o_total = o_q + o_k + o_v
+
+    A_fused = torch.cat([A_q, A_k, A_v], dim=0)
+
+    B_fused = torch.zeros(o_total, r_total, dtype=B_q.dtype, device=B_q.device)
+    B_fused[0         : o_q,          0         : r_q         ] = B_q
+    B_fused[o_q       : o_q + o_k,   r_q       : r_q + r_k   ] = B_k
+    B_fused[o_q + o_k : o_total,     r_q + r_k : r_total     ] = B_v
+
+    out[f"{dst}.lora_A.weight"] = A_fused
+    out[f"{dst}.lora_B.weight"] = B_fused
+    out[f"{dst}.alpha"] = torch.tensor(float(r_total))
+
+    for kk in keys_A + keys_B:
+        done.add(kk)
+    for b in (q, k, v):
+        done.add(f"{b}.alpha")
+
+
+def _fuse_linear1(norm, out, done, sb_base):
+    """
+    Fuse single-block components into linear1 (same block-diag logic as QKV).
+
+    linear1 shape: [36864, 4096]  =  [q+k+v=12288  +  mlp_gate_up=24576,  in=4096]
+    """
+    components = [
+        (f"{sb_base}.attn.to_q",  "q"),
+        (f"{sb_base}.attn.to_k",  "k"),
+        (f"{sb_base}.attn.to_v",  "v"),
+        (f"{sb_base}.proj_mlp",   "mlp"),
+    ]
+    dst = f"diffusion_model.{sb_base}.linear1"
+
+    present = [
+        (base, label)
+        for base, label in components
+        if f"{base}.lora_A.weight" in norm and f"{base}.lora_B.weight" in norm
+    ]
+    if not present:
+        return
+
+    A_list, B_scaled = [], []
+    for base, _ in present:
+        A = norm[f"{base}.lora_A.weight"]
+        B = norm[f"{base}.lora_B.weight"] * _alpha_scale(norm, base)
+        A_list.append(A)
+        B_scaled.append(B)
+        done.update([f"{base}.lora_A.weight", f"{base}.lora_B.weight", f"{base}.alpha"])
+
+    ranks  = [A.shape[0] for A in A_list]
+    outs   = [B.shape[0] for B in B_scaled]
+    r_total, o_total = sum(ranks), sum(outs)
+
+    A_fused = torch.cat(A_list, dim=0)
+    B_fused = torch.zeros(o_total, r_total,
+                           dtype=B_scaled[0].dtype, device=B_scaled[0].device)
+    r_off, o_off = 0, 0
+    for A, B in zip(A_list, B_scaled):
+        r, o = A.shape[0], B.shape[0]
+        B_fused[o_off : o_off + o, r_off : r_off + r] = B
+        r_off += r
+        o_off += o
+
+    out[f"{dst}.lora_A.weight"] = A_fused
+    out[f"{dst}.lora_B.weight"] = B_fused
+    out[f"{dst}.alpha"] = torch.tensor(float(r_total))
+
+
+def _remap(norm, out, done, src_base, dst_base):
+    """Copy a LoRA pair (lora_A / lora_B / alpha) from src to dst key name."""
+    key_A = f"{src_base}.lora_A.weight"
+    key_B = f"{src_base}.lora_B.weight"
+    if key_A not in norm or key_B not in norm:
+        return
+    out[f"{dst_base}.lora_A.weight"] = norm[key_A]
+    out[f"{dst_base}.lora_B.weight"] = norm[key_B]
+    done.update([key_A, key_B])
+    alpha_key = f"{src_base}.alpha"
+    if alpha_key in norm:
+        out[f"{dst_base}.alpha"] = norm[alpha_key]
+        done.add(alpha_key)
+
+
+# ── Full conversion pipeline ─────────────────────────────────────────────────
+
+def _convert_to_native(lora_sd):
+    """Convert diffusers/Musubi LoRA keys to ComfyUI-native format."""
+    norm = _normalize_keys(lora_sd)
+    out = {}
+    done = set()
+
+    for i in range(N_DOUBLE):
+        db = f"double_blocks.{i}"
+
+        _fuse_qkv(
+            norm, out, done,
+            q=f"{db}.attn.to_q",
+            k=f"{db}.attn.to_k",
+            v=f"{db}.attn.to_v",
+            dst=f"diffusion_model.{db}.img_attn.qkv",
+        )
+
+        _fuse_qkv(
+            norm, out, done,
+            q=f"{db}.attn.add_q_proj",
+            k=f"{db}.attn.add_k_proj",
+            v=f"{db}.attn.add_v_proj",
+            dst=f"diffusion_model.{db}.txt_attn.qkv",
+        )
+
+        for src, dst in [
+            (f"{db}.attn.to_out.0",        f"diffusion_model.{db}.img_attn.proj"),
+            (f"{db}.attn.to_add_out",       f"diffusion_model.{db}.txt_attn.proj"),
+            (f"{db}.ff.net.0.proj",         f"diffusion_model.{db}.img_mlp.0"),
+            (f"{db}.ff.net.2",              f"diffusion_model.{db}.img_mlp.2"),
+            (f"{db}.ff_context.net.0.proj", f"diffusion_model.{db}.txt_mlp.0"),
+            (f"{db}.ff_context.net.2",      f"diffusion_model.{db}.txt_mlp.2"),
+        ]:
+            _remap(norm, out, done, src, dst)
+
+    for i in range(N_SINGLE):
+        sb = f"single_blocks.{i}"
+        _remap(norm, out, done, f"{sb}.attn.to_qkv_mlp_proj", f"diffusion_model.{sb}.linear1")
+        _remap(norm, out, done, f"{sb}.attn.to_out", f"diffusion_model.{sb}.linear2")
+        _fuse_linear1(norm, out, done, sb)
+        _remap(norm, out, done, f"{sb}.proj_out", f"diffusion_model.{sb}.linear2")
+
+    for key, val in norm.items():
+        if key not in done:
+            out[key] = val
+
+    n_converted = sum(1 for k in done if k in norm)
+    logger.info(f"[FLUX LoRA] Converted {n_converted} diffusers keys → {len(out)} native keys")
+    return out
+
+
+# ── Per-layer strength scaling ────────────────────────────────────────────────
+
+def _apply_layer_strengths(lora_sd, layer_cfg, global_strength):
+    """
+    Scale lora_B tensors per-layer before patching.
+
+    layer_cfg format (from the JS graph widget):
+      {
+        "db": { "0": {"img": 1.2, "txt": 0.8}, "1": {...}, ... },
+        "sb": { "0": 0.9, "1": 1.1, ... }
+      }
+    """
+    if not layer_cfg or abs(global_strength) < 1e-8:
+        return lora_sd
+
+    db_cfg = {str(k): v for k, v in layer_cfg.get("db", {}).items()}
+    sb_cfg = {str(k): v for k, v in layer_cfg.get("sb", {}).items()}
+    scaled = {}
+
+    for key, tensor in lora_sd.items():
+        if not (key.endswith(".lora_B.weight") or key.endswith(".lora_up.weight")):
+            scaled[key] = tensor
+            continue
+        parts  = key.split(".")
+        target = None
+        for i, p in enumerate(parts):
+            if p == "double_blocks" and i + 1 < len(parts):
+                idx = parts[i + 1]
+                if idx in db_cfg:
+                    cfg    = db_cfg[idx]
+                    is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
+                    side   = "txt" if is_txt else "img"
+                    target = cfg.get(side, global_strength) if isinstance(cfg, dict) else float(cfg)
+                break
+            if p == "single_blocks" and i + 1 < len(parts):
+                idx = parts[i + 1]
+                if idx in sb_cfg:
+                    target = float(sb_cfg[idx])
+                break
+        scaled[key] = tensor * (target / global_strength) if target is not None else tensor
+
+    return scaled
+
+
+# ── Edit-mode multipliers ─────────────────────────────────────────────────────
+
+def _apply_edit_multipliers(lora_sd, preset_cfg):
+    """
+    Scale lora_B tensors by edit-mode preset multipliers.
+    Applies multipliers directly: tensor * multiplier.
+    """
+    db_cfg = {str(k): v for k, v in preset_cfg.get("db", {}).items()}
+    sb_cfg = {str(k): v for k, v in preset_cfg.get("sb", {}).items()}
+    scaled = {}
+
+    for key, tensor in lora_sd.items():
+        if not key.endswith(".lora_B.weight"):
+            scaled[key] = tensor
+            continue
+        parts = key.split(".")
+        multiplier = None
+        for i, p in enumerate(parts):
+            if p == "double_blocks" and i + 1 < len(parts):
+                idx = parts[i + 1]
+                if idx in db_cfg:
+                    cfg = db_cfg[idx]
+                    is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
+                    side = "txt" if is_txt else "img"
+                    multiplier = cfg.get(side, 1.0) if isinstance(cfg, dict) else float(cfg)
+                break
+            if p == "single_blocks" and i + 1 < len(parts):
+                idx = parts[i + 1]
+                if idx in sb_cfg:
+                    multiplier = float(sb_cfg[idx])
+                break
+        if multiplier is not None and abs(multiplier - 1.0) > 1e-6:
+            scaled[key] = tensor * multiplier
+        else:
+            scaled[key] = tensor
+
+    return scaled
+
+
+# ── Key map ───────────────────────────────────────────────────────────────────
+
+def _build_key_map(model):
+    """Build lora_key_base → model_state_dict_key mapping."""
+    key_map = {}
+    for model_key in model.model.state_dict().keys():
+        if not model_key.endswith(".weight"):
+            continue
+        base = model_key[: -len(".weight")]
+        bare = base[len("diffusion_model."):] if base.startswith("diffusion_model.") else base
+        for pfx in ("diffusion_model.", "transformer.", ""):
+            key_map[f"{pfx}{bare}"] = model_key
+        key_map["lora_unet_" + bare.replace(".", "_")] = model_key
+    return key_map
+
+
+# ── Edit-mode resolution ─────────────────────────────────────────────────────
 
 def _resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA"):
     """Resolve edit_mode (including Auto) into a preset config or None."""
@@ -71,7 +403,6 @@ def _resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA"):
             logger.info(f"[{node_label}] Auto → {auto_preset} (balance={auto_balance:.2f})")
             return cfg
         return None
-    # Manual preset
     preset_raw = EDIT_PRESETS.get(edit_mode)
     if preset_raw is not None:
         cfg = interpolate_preset(preset_raw, balance)
@@ -80,13 +411,112 @@ def _resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA"):
     return None
 
 
-# ── Single loader ──────────────────────────────────────────────────────────────
+# ── Auto-strength computation (ported from flux_lora_auto_strength.py) ────────
+
+def _all_norms(analysis):
+    out = []
+    for i in range(N_DOUBLE):
+        db = analysis["db"].get(i, {})
+        if db.get("img") is not None: out.append(db["img"])
+        if db.get("txt") is not None: out.append(db["txt"])
+    for i in range(N_SINGLE):
+        v = analysis["sb"].get(i)
+        if v is not None: out.append(v)
+    return out
+
+
+def _compute_strengths(analysis, global_strength):
+    """Inverse-proportional auto-strength: high ΔW → lower strength."""
+    all_norms = _all_norms(analysis)
+    if not all_norms:
+        return {
+            "db": {str(i): {"img": global_strength, "txt": global_strength} for i in range(N_DOUBLE)},
+            "sb": {str(i): global_strength for i in range(N_SINGLE)},
+        }
+
+    mean_norm = float(np.mean(all_norms))
+
+    def clamp(v):
+        return max(_AUTO_FLOOR, min(_AUTO_CEILING, v))
+
+    def map_norm(norm):
+        if norm is None or norm < 1e-8:
+            return global_strength
+        return clamp(global_strength * (mean_norm / norm))
+
+    return {
+        "db": {
+            str(i): {
+                "img": round(map_norm(analysis["db"][i].get("img")), 4),
+                "txt": round(map_norm(analysis["db"][i].get("txt")), 4),
+            }
+            for i in range(N_DOUBLE)
+        },
+        "sb": {
+            str(i): round(map_norm(analysis["sb"].get(i)), 4)
+            for i in range(N_SINGLE)
+        },
+    }
+
+
+# ── Unified load-and-patch helper ─────────────────────────────────────────────
+
+def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance,
+                    layer_cfg=None, auto_strength=False, node_label="FLUX LoRA"):
+    """
+    Shared pipeline: load → convert → apply edits → apply layer strengths → patch.
+    Returns patched model clone.
+    """
+    if strength == 0:
+        return model
+
+    lora_path = folder_paths.get_full_path("loras", lora_name)
+    lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
+    logger.info(f"[{node_label}] Loading: {lora_name}  ({len(lora_sd)} keys)")
+
+    # Auto-strength: compute layer strengths from ΔW analysis
+    if auto_strength and not layer_cfg:
+        from .lora_meta import analyse_for_node
+        analysis = analyse_for_node(lora_path)
+        layer_cfg = _compute_strengths(analysis, abs(strength))
+        logger.info(f"[{node_label}] Auto-strength computed for {lora_name}")
+
+    # Resolve edit-mode preset
+    edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, node_label)
+
+    # Convert format if needed
+    if auto_convert and _is_diffusers_format(lora_sd):
+        logger.info(f"[{node_label}] Detected diffusers format — converting")
+        lora_sd = _convert_to_native(lora_sd)
+
+    # Apply per-layer strengths (from graph widget or auto-strength)
+    if layer_cfg:
+        lora_sd = _apply_layer_strengths(lora_sd, layer_cfg, strength)
+
+    # Apply edit-mode multipliers
+    if edit_preset_cfg:
+        lora_sd = _apply_edit_multipliers(lora_sd, edit_preset_cfg)
+
+    # Build patches and apply
+    key_map = _build_key_map(model)
+    patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
+    logger.info(f"[{node_label}] Applied {len(patch_dict)} patches")
+
+    model_out = model.clone()
+    effective_strength = 1.0 if layer_cfg else strength
+    model_out.add_patches(patch_dict, strength_patch=effective_strength, strength_model=1.0)
+    return model_out
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NODE 1 — FluxLoraLoader  (single LoRA, graph widget, auto-strength toggle)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class FluxLoraLoader:
     """
-    Loads a single diffusers-format FLUX LoRA and applies it to a FLUX model.
-    The JS graph widget provides per-layer strength bars for img/txt (double) and
-    single blocks, serialized into the hidden `layer_strengths` widget as JSON.
+    Loads a single FLUX LoRA with interactive per-layer strength graph widget.
+    Supports auto-strength toggle that computes optimal per-layer strengths
+    from ΔW forensic analysis.
     """
 
     @classmethod
@@ -95,10 +525,10 @@ class FluxLoraLoader:
             "required": {
                 "model": ("MODEL",),
                 "lora_name": (folder_paths.get_filename_list("loras"),),
-                "strength_model": ("FLOAT", {
+                "strength": ("FLOAT", {
                     "default": 1.0,
-                    "min": -20.0,
-                    "max": 20.0,
+                    "min": -5.0,
+                    "max": 5.0,
                     "step": 0.01,
                 }),
                 "auto_convert": ("BOOLEAN", {
@@ -107,11 +537,13 @@ class FluxLoraLoader:
                     "label_off": "Direct load (native only)",
                 }),
             },
-            # Written by the JS graph widget — never shown as a text box
             "optional": {
-                "layer_strengths":    ("STRING", {"default": "{}"}),
-                # Wire from FluxLoraAutoStrength so you only pick the LoRA once
-                "lora_name_override": ("STRING", {"forceInput": True}),
+                "auto_strength": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "Auto (ΔW analysis)",
+                    "label_off": "Manual (graph bars)",
+                    "tooltip": "When ON: auto-compute per-layer strengths from LoRA weight analysis. Bars auto-populate.",
+                }),
                 "edit_mode": (PRESET_NAMES, {
                     "default": "None",
                     "tooltip": "Semantic edit preset for Klein 9B. Controls which layers are dampened to preserve identity, style, etc.",
@@ -123,6 +555,8 @@ class FluxLoraLoader:
                     "step": 0.05,
                     "tooltip": "0.0 = full preset effect (max protection), 1.0 = standard LoRA (no protection).",
                 }),
+                # Written by the JS graph widget — never shown as a text box
+                "layer_strengths": ("STRING", {"default": "{}"}),
             },
         }
 
@@ -131,21 +565,13 @@ class FluxLoraLoader:
     CATEGORY = "loaders/FLUX"
     TITLE = "FLUX LoRA Loader"
 
-    def load_lora(self, model, lora_name, strength_model,
-                  auto_convert=True, layer_strengths="{}", lora_name_override="",
+    def load_lora(self, model, lora_name, strength,
+                  auto_convert=True, auto_strength=False, layer_strengths="{}",
                   edit_mode="None", balance=0.5):
-        if strength_model == 0:
+        if strength == 0:
             return (model,)
 
-        # If wired from AutoStrength, use that name — ignore the dropdown
-        if lora_name_override and lora_name_override.strip():
-            lora_name = lora_name_override.strip()
-
-        lora_path = folder_paths.get_full_path("loras", lora_name)
-        lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
-        logger.info(f"[FLUX LoRA] Loading: {lora_name}  ({len(lora_sd)} keys)")
-
-        # Parse per-layer strengths from graph widget / AutoStrength
+        # Parse per-layer strengths from graph widget
         layer_cfg = {}
         try:
             raw = json.loads(layer_strengths)
@@ -154,585 +580,87 @@ class FluxLoraLoader:
         except Exception:
             pass
 
-        # Resolve edit-mode preset
-        edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, "FLUX LoRA")
-
-        if auto_convert and self._is_diffusers_format(lora_sd):
-            logger.info("[FLUX LoRA] Detected diffusers format — converting")
-            lora_sd = self._convert_to_native(lora_sd)
-
-        # Step 1: Apply AutoStrength / widget layer_cfg (existing pipeline)
-        if layer_cfg:
-            sample_key = next((k for k in lora_sd if k.endswith(".lora_B.weight") or k.endswith(".lora_up.weight")), None)
-            norm_before = float(lora_sd[sample_key].float().norm().item()) if sample_key else None
-
-            lora_sd = self._apply_layer_strengths(lora_sd, layer_cfg, strength_model)
-
-            norm_after = float(lora_sd[sample_key].float().norm().item()) if sample_key else None
-            if norm_before is not None:
-                ratio = norm_after / norm_before if norm_before > 1e-8 else 0
-                logger.warning(
-                    f"[FLUX LoRA] ✅ AUTO-STRENGTH APPLIED — "
-                    f"sample tensor '{sample_key}' "
-                    f"norm: {norm_before:.6f} → {norm_after:.6f} "
-                    f"(ratio={ratio:.4f}, expected≠1.0 if scaling active)"
-                )
-
-        # Step 2: Apply edit-mode multipliers on top (independent of strength_model)
-        if edit_preset_cfg:
-            lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
-
-        key_map = self._build_key_map(model)
-        patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
-        logger.info(f"[FLUX LoRA] Applied {len(patch_dict)} patches")
-
-        model_lora = model.clone()
-        # Per-layer scaling already baked → pass 1.0 to avoid double-scaling
-        effective_strength = 1.0 if layer_cfg else strength_model
-        model_lora.add_patches(patch_dict, strength_patch=effective_strength, strength_model=1.0)
-
-        return (model_lora,)
-
-    # ── Format detection ───────────────────────────────────────────────────────
-
-    @staticmethod
-    def _is_diffusers_format(lora_sd):
-        markers = (
-            ".to_q.",               # separate Q proj
-            ".to_k.",               # separate K proj
-            ".to_v.",               # separate V proj
-            ".add_q_proj.",         # FLUX txt Q
-            ".add_k_proj.",         # FLUX txt K
-            ".add_v_proj.",         # FLUX txt V
-            "transformer_blocks.",  # diffusers double-block prefix
-            "single_transformer_blocks.",  # diffusers single-block prefix
-            ".ff.net.",             # diffusers FFN naming
-            ".ff_context.",         # FLUX txt FFN
-            ".to_add_out.",         # FLUX txt out proj
-            ".proj_mlp.",           # FLUX single block mlp gate
-            ".to_qkv_mlp_proj.",    # Musubi Tuner fused single block
-            ".ff.linear_in.",       # Musubi Tuner FFN naming
-            ".ff.linear_out.",      # Musubi Tuner FFN naming
+        model_out = _load_and_patch(
+            model, lora_name, strength, auto_convert, edit_mode, balance,
+            layer_cfg=layer_cfg, auto_strength=auto_strength,
+            node_label="FLUX LoRA Loader",
         )
-        return any(m in k for k in lora_sd for m in markers)
-
-    # ── Conversion: diffusers → native ─────────────────────────────────────────
-
-    def _convert_to_native(self, lora_sd):
-        norm = self._normalize_keys(lora_sd)
-        out = {}
-        done = set()
-
-        for i in range(N_DOUBLE):
-            db = f"double_blocks.{i}"
-
-            # img stream: fuse to_q + to_k + to_v → img_attn.qkv
-            self._fuse_qkv(
-                norm, out, done,
-                q=f"{db}.attn.to_q",
-                k=f"{db}.attn.to_k",
-                v=f"{db}.attn.to_v",
-                dst=f"diffusion_model.{db}.img_attn.qkv",
-            )
-
-            # txt stream: fuse add_q_proj + add_k_proj + add_v_proj → txt_attn.qkv
-            self._fuse_qkv(
-                norm, out, done,
-                q=f"{db}.attn.add_q_proj",
-                k=f"{db}.attn.add_k_proj",
-                v=f"{db}.attn.add_v_proj",
-                dst=f"diffusion_model.{db}.txt_attn.qkv",
-            )
-
-            # Simple remaps (output projections + FFN)
-            for src, dst in [
-                (f"{db}.attn.to_out.0",        f"diffusion_model.{db}.img_attn.proj"),
-                (f"{db}.attn.to_add_out",       f"diffusion_model.{db}.txt_attn.proj"),
-                (f"{db}.ff.net.0.proj",         f"diffusion_model.{db}.img_mlp.0"),
-                (f"{db}.ff.net.2",              f"diffusion_model.{db}.img_mlp.2"),
-                (f"{db}.ff_context.net.0.proj", f"diffusion_model.{db}.txt_mlp.0"),
-                (f"{db}.ff_context.net.2",      f"diffusion_model.{db}.txt_mlp.2"),
-            ]:
-                self._remap(norm, out, done, src, dst)
-
-        for i in range(N_SINGLE):
-            sb = f"single_blocks.{i}"
-
-            # Musubi Tuner: already-fused to_qkv_mlp_proj → linear1 (direct remap)
-            self._remap(norm, out, done,
-                        f"{sb}.attn.to_qkv_mlp_proj",
-                        f"diffusion_model.{sb}.linear1")
-
-            # Musubi Tuner: attn.to_out → linear2 (direct remap)
-            self._remap(norm, out, done,
-                        f"{sb}.attn.to_out",
-                        f"diffusion_model.{sb}.linear2")
-
-            # Standard diffusers: separate q/k/v/proj_mlp → linear1 (block-diag fused)
-            self._fuse_linear1(norm, out, done, sb)
-
-            # Standard diffusers: proj_out → linear2
-            self._remap(norm, out, done,
-                        f"{sb}.proj_out",
-                        f"diffusion_model.{sb}.linear2")
-
-        # Pass through anything not processed (already-native keys, unknowns)
-        for key, val in norm.items():
-            if key not in done:
-                out[key] = val
-
-        n_converted = sum(1 for k in done if k in norm)
-        logger.info(f"[FLUX LoRA] Converted {n_converted} diffusers keys → {len(out)} native keys")
-        return out
-
-    @staticmethod
-    def _normalize_keys(lora_sd):
-        """
-        Strip prefix variations and remap diffusers layer names to native,
-        so all keys are in the form  double_blocks.{i}.* / single_blocks.{i}.*
-        """
-        out = {}
-        for key, val in lora_sd.items():
-            k = key
-            # Strip leading model prefix
-            for pfx in ("transformer.", "diffusion_model.", "unet."):
-                if k.startswith(pfx):
-                    k = k[len(pfx):]
-                    break
-            # Remap diffusers layer names to ComfyUI-native
-            k = re.sub(r'^transformer_blocks\.',        'double_blocks.', k)
-            k = re.sub(r'^single_transformer_blocks\.', 'single_blocks.', k)
-            # Normalize lora_down / lora_up → lora_A / lora_B
-            k = k.replace(".lora_down.", ".lora_A.").replace(".lora_up.", ".lora_B.")
-            # Strip .default. from Musubi Tuner / PEFT format keys
-            # e.g. .lora_A.default.weight → .lora_A.weight
-            k = k.replace(".lora_A.default.", ".lora_A.").replace(".lora_B.default.", ".lora_B.")
-            # Musubi Tuner FFN naming → diffusers naming (for uniform processing)
-            k = k.replace(".ff.linear_in.", ".ff.net.0.proj.")
-            k = k.replace(".ff.linear_out.", ".ff.net.2.")
-            k = k.replace(".ff_context.linear_in.", ".ff_context.net.0.proj.")
-            k = k.replace(".ff_context.linear_out.", ".ff_context.net.2.")
-            out[k] = val
-        return out
-
-    @staticmethod
-    def _alpha_scale(norm, base):
-        """Return alpha/rank for one LoRA component (defaults to 1.0 if absent)."""
-        down_key  = f"{base}.lora_A.weight"
-        alpha_key = f"{base}.alpha"
-        if alpha_key in norm and down_key in norm:
-            rank = norm[down_key].shape[0]
-            if rank > 0:
-                return float(norm[alpha_key]) / rank
-        return 1.0
-
-    def _fuse_qkv(self, norm, out, done, q, k, v, dst):
-        """
-        Fuse three separate LoRAs (Q, K, V) into one block-diagonal LoRA.
-
-        ΔW_qkv = [B_q@A_q ; B_k@A_k ; B_v@A_v]
-
-        Represented as:
-          A_fused = [A_q ; A_k ; A_v]              shape [3r, in]
-          B_fused = block_diag(B_q, B_k, B_v)      shape [3·out, 3r]
-
-        alpha/rank scale is pre-baked into each B_i so the stored alpha equals
-        the rank (→ effective scale = 1.0, no double-scaling at apply time).
-        """
-        keys_A = [f"{b}.lora_A.weight" for b in (q, k, v)]
-        keys_B = [f"{b}.lora_B.weight" for b in (q, k, v)]
-
-        if not all(kk in norm for kk in keys_A + keys_B):
-            return
-
-        A_q, A_k, A_v = [norm[kk] for kk in keys_A]
-        B_q, B_k, B_v = (norm[kk] * self._alpha_scale(norm, b)
-                          for kk, b in zip(keys_B, (q, k, v)))
-
-        r_q, r_k, r_v   = A_q.shape[0], A_k.shape[0], A_v.shape[0]
-        o_q, o_k, o_v   = B_q.shape[0], B_k.shape[0], B_v.shape[0]
-        r_total = r_q + r_k + r_v
-        o_total = o_q + o_k + o_v
-
-        A_fused = torch.cat([A_q, A_k, A_v], dim=0)  # [3r, in]
-
-        B_fused = torch.zeros(o_total, r_total, dtype=B_q.dtype, device=B_q.device)
-        B_fused[0         : o_q,          0         : r_q         ] = B_q
-        B_fused[o_q       : o_q + o_k,   r_q       : r_q + r_k   ] = B_k
-        B_fused[o_q + o_k : o_total,     r_q + r_k : r_total     ] = B_v
-
-        out[f"{dst}.lora_A.weight"] = A_fused
-        out[f"{dst}.lora_B.weight"] = B_fused
-        # alpha == rank  →  alpha/rank == 1.0  (scaling already baked into B)
-        out[f"{dst}.alpha"] = torch.tensor(float(r_total))
-
-        for kk in keys_A + keys_B:
-            done.add(kk)
-        for b in (q, k, v):
-            done.add(f"{b}.alpha")   # mark as consumed even if absent
-
-    def _fuse_linear1(self, norm, out, done, sb_base):
-        """
-        Fuse single-block components into linear1 (same block-diag logic as QKV).
-
-        linear1 shape: [36864, 4096]  =  [q+k+v=12288  +  mlp_gate_up=24576,  in=4096]
-        """
-        components = [
-            (f"{sb_base}.attn.to_q",  "q"),
-            (f"{sb_base}.attn.to_k",  "k"),
-            (f"{sb_base}.attn.to_v",  "v"),
-            (f"{sb_base}.proj_mlp",   "mlp"),
-        ]
-        dst = f"diffusion_model.{sb_base}.linear1"
-
-        present = [
-            (base, label)
-            for base, label in components
-            if f"{base}.lora_A.weight" in norm and f"{base}.lora_B.weight" in norm
-        ]
-        if not present:
-            return
-
-        A_list, B_scaled = [], []
-        for base, _ in present:
-            A = norm[f"{base}.lora_A.weight"]
-            B = norm[f"{base}.lora_B.weight"] * self._alpha_scale(norm, base)
-            A_list.append(A)
-            B_scaled.append(B)
-            done.update([f"{base}.lora_A.weight", f"{base}.lora_B.weight", f"{base}.alpha"])
-
-        ranks  = [A.shape[0] for A in A_list]
-        outs   = [B.shape[0] for B in B_scaled]
-        r_total, o_total = sum(ranks), sum(outs)
-
-        A_fused = torch.cat(A_list, dim=0)
-        B_fused = torch.zeros(o_total, r_total,
-                               dtype=B_scaled[0].dtype, device=B_scaled[0].device)
-        r_off, o_off = 0, 0
-        for A, B in zip(A_list, B_scaled):
-            r, o = A.shape[0], B.shape[0]
-            B_fused[o_off : o_off + o, r_off : r_off + r] = B
-            r_off += r
-            o_off += o
-
-        out[f"{dst}.lora_A.weight"] = A_fused
-        out[f"{dst}.lora_B.weight"] = B_fused
-        out[f"{dst}.alpha"] = torch.tensor(float(r_total))
-
-    @staticmethod
-    def _remap(norm, out, done, src_base, dst_base):
-        """Copy a LoRA pair (lora_A / lora_B / alpha) from src to dst key name."""
-        key_A = f"{src_base}.lora_A.weight"
-        key_B = f"{src_base}.lora_B.weight"
-        if key_A not in norm or key_B not in norm:
-            return
-        out[f"{dst_base}.lora_A.weight"] = norm[key_A]
-        out[f"{dst_base}.lora_B.weight"] = norm[key_B]
-        done.update([key_A, key_B])
-        alpha_key = f"{src_base}.alpha"
-        if alpha_key in norm:
-            out[f"{dst_base}.alpha"] = norm[alpha_key]
-            done.add(alpha_key)
-
-    # ── Per-layer strength scaling ─────────────────────────────────────────────
-
-    @staticmethod
-    def _apply_layer_strengths(lora_sd, layer_cfg, global_strength):
-        """
-        Scale lora_B tensors per-layer before patching.
-
-        layer_cfg format (from the JS graph widget):
-          {
-            "db": { "0": {"img": 1.2, "txt": 0.8}, "1": {...}, ... },
-            "sb": { "0": 0.9, "1": 1.1, ... }
-          }
-        """
-        if abs(global_strength) < 1e-8:
-            return lora_sd
-
-        db_cfg = {str(k): v for k, v in layer_cfg.get("db", {}).items()}
-        sb_cfg = {str(k): v for k, v in layer_cfg.get("sb", {}).items()}
-
-        scaled = {}
-        for key, tensor in lora_sd.items():
-            if not key.endswith(".lora_B.weight"):
-                scaled[key] = tensor
-                continue
-
-            parts = key.split(".")
-            target = None
-
-            for i, p in enumerate(parts):
-                if p == "double_blocks" and i + 1 < len(parts):
-                    idx = parts[i + 1]
-                    if idx in db_cfg:
-                        cfg = db_cfg[idx]
-                        is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
-                        side = "txt" if is_txt else "img"
-                        target = (cfg.get(side, global_strength)
-                                  if isinstance(cfg, dict) else float(cfg))
-                    break
-                if p == "single_blocks" and i + 1 < len(parts):
-                    idx = parts[i + 1]
-                    if idx in sb_cfg:
-                        target = float(sb_cfg[idx])
-                    break
-
-            if target is not None:
-                scaled[key] = tensor * (target / global_strength)
-            else:
-                scaled[key] = tensor
-
-        return scaled
-
-    # ── Edit-mode multipliers ───────────────────────────────────────────────
-
-    @staticmethod
-    def _apply_edit_multipliers(lora_sd, preset_cfg):
-        """
-        Scale lora_B tensors by edit-mode preset multipliers.
-
-        Unlike _apply_layer_strengths (which normalizes relative to global_strength),
-        this applies multipliers directly: tensor * multiplier.
-        Global strength is handled separately via effective_strength in add_patches.
-        """
-        db_cfg = {str(k): v for k, v in preset_cfg.get("db", {}).items()}
-        sb_cfg = {str(k): v for k, v in preset_cfg.get("sb", {}).items()}
-
-        scaled = {}
-        for key, tensor in lora_sd.items():
-            if not key.endswith(".lora_B.weight"):
-                scaled[key] = tensor
-                continue
-
-            parts = key.split(".")
-            multiplier = None
-
-            for i, p in enumerate(parts):
-                if p == "double_blocks" and i + 1 < len(parts):
-                    idx = parts[i + 1]
-                    if idx in db_cfg:
-                        cfg = db_cfg[idx]
-                        is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
-                        side = "txt" if is_txt else "img"
-                        multiplier = (cfg.get(side, 1.0)
-                                      if isinstance(cfg, dict) else float(cfg))
-                    break
-                if p == "single_blocks" and i + 1 < len(parts):
-                    idx = parts[i + 1]
-                    if idx in sb_cfg:
-                        multiplier = float(sb_cfg[idx])
-                    break
-
-            if multiplier is not None and abs(multiplier - 1.0) > 1e-6:
-                scaled[key] = tensor * multiplier
-            else:
-                scaled[key] = tensor
-
-        return scaled
-
-    # ── Key map ────────────────────────────────────────────────────────────────
-
-    def _build_key_map(self, model):
-        """
-        Build a dict: {lora_key_base → model_state_dict_key} to handle the
-        various prefix conventions a LoRA file might use.
-        """
-        key_map = {}
-        for model_key in model.model.state_dict().keys():
-            if not model_key.endswith(".weight"):
-                continue
-
-            base = model_key[: -len(".weight")]
-            bare = (base[len("diffusion_model."):]
-                    if base.startswith("diffusion_model.") else base)
-
-            # Register with multiple prefix styles
-            for pfx in ("diffusion_model.", "transformer.", ""):
-                key_map[f"{pfx}{bare}"] = model_key
-
-            # Kohya-style  (dots → underscores, lora_unet_ prefix)
-            key_map["lora_unet_" + bare.replace(".", "_")] = model_key
-
-        logger.info(f"[FLUX LoRA] Key map: {len(key_map)} entries")
-        return key_map
+        return (model_out,)
 
 
-# ── Stack ──────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# NODE 2 — FluxLoraMulti  (dynamic multi-slot, rgthree-style)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class FluxLoraStack(FluxLoraLoader):
+class FluxLoraMulti:
     """
-    Apply up to 10 FLUX LoRAs in sequence.
-    Each slot has its own strength, on/off toggle, and auto-convert flag.
+    Dynamic multi-LoRA loader with per-slot control.
+    Slots are managed by JS widget (+ Add LoRA / ✕ Remove).
+    Each slot has: enabled, lora, strength, edit_mode, balance.
     """
 
     @classmethod
     def INPUT_TYPES(cls):
-        loras = ["None"] + folder_paths.get_filename_list("loras")
-        optional = {
-            "edit_mode": (PRESET_NAMES, {
-                "default": "None",
-                "tooltip": "Semantic edit preset applied to ALL LoRAs in the stack.",
-            }),
-            "balance": ("FLOAT", {
-                "default": 0.5,
-                "min": 0.0,
-                "max": 1.0,
-                "step": 0.05,
-                "tooltip": "0.0 = full preset effect (max protection), 1.0 = standard LoRA (no protection).",
-            }),
-        }
-        for i in range(1, _MAX_SLOTS + 1):
-            optional[f"lora_{i}"]     = (loras,)
-            optional[f"strength_{i}"] = ("FLOAT", {
-                "default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01,
-            })
-            optional[f"enabled_{i}"]  = ("BOOLEAN", {
-                "default": True, "label_on": "On", "label_off": "Off",
-            })
-            optional[f"convert_{i}"]  = ("BOOLEAN", {
-                "default": True, "label_on": "Auto-convert", "label_off": "Direct",
-            })
         return {
-            "required": {"model": ("MODEL",)},
-            "optional": optional,
+            "required": {
+                "model": ("MODEL",),
+            },
+            "optional": {
+                "auto_convert": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "Auto-convert diffusers→native",
+                    "label_off": "Direct load (native only)",
+                }),
+                # Hidden — populated by JS widget, JSON array of slot configs
+                "slot_data": ("STRING", {
+                    "default": "[]",
+                    "multiline": False,
+                }),
+            },
         }
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_loras"
     CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX LoRA Stack"
+    TITLE = "FLUX LoRA Multi"
 
-    def load_loras(self, model, **kwargs):
-        key_map = self._build_key_map(model)
+    def load_loras(self, model, auto_convert=True, slot_data="[]"):
+        try:
+            slots = json.loads(slot_data)
+        except Exception:
+            logger.warning("[FLUX LoRA Multi] Invalid slot_data JSON, skipping")
+            return (model,)
+
+        if not isinstance(slots, list):
+            return (model,)
+
         current = model
-
-        edit_mode = kwargs.get("edit_mode", "None")
-        balance = kwargs.get("balance", 0.5)
-
-        # For non-Auto modes, pre-compute preset once
-        stack_preset_cfg = None
-        if edit_mode not in ("None", "Auto"):
-            preset_raw = EDIT_PRESETS.get(edit_mode)
-            if preset_raw is not None:
-                stack_preset_cfg = interpolate_preset(preset_raw, balance)
-                logger.info(f"[FLUX LoRA Stack] Edit mode '{edit_mode}' (balance={balance:.2f})")
-
-        for i in range(1, _MAX_SLOTS + 1):
-            name     = kwargs.get(f"lora_{i}",     "None")
-            strength = kwargs.get(f"strength_{i}", 1.0)
-            enabled  = kwargs.get(f"enabled_{i}",  True)
-            convert  = kwargs.get(f"convert_{i}",  True)
-
-            if not enabled or name == "None" or strength == 0:
+        for i, slot in enumerate(slots):
+            if not isinstance(slot, dict):
                 continue
 
-            lora_path = folder_paths.get_full_path("loras", name)
-            lora_sd   = comfy.utils.load_torch_file(lora_path, safe_load=True)
-            logger.info(f"[FLUX LoRA Stack] Slot {i}: {name}  ({len(lora_sd)} keys)")
+            enabled   = slot.get("enabled", True)
+            lora_name = slot.get("lora", "None")
+            strength  = slot.get("strength", 1.0)
+            edit_mode = slot.get("edit_mode", "None")
+            balance   = slot.get("balance", 0.5)
 
-            if convert and self._is_diffusers_format(lora_sd):
-                lora_sd = self._convert_to_native(lora_sd)
+            if not enabled or lora_name == "None" or strength == 0:
+                continue
 
-            # Apply edit-mode multipliers
-            if edit_mode == "Auto":
-                # Auto analyzes each LoRA individually
-                slot_preset = _resolve_edit_mode("Auto", balance, lora_path, f"FLUX LoRA Stack] Slot {i}")
-                if slot_preset:
-                    lora_sd = self._apply_edit_multipliers(lora_sd, slot_preset)
-            elif stack_preset_cfg:
-                lora_sd = self._apply_edit_multipliers(lora_sd, stack_preset_cfg)
-
-            patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
-            next_model = current.clone()
-            next_model.add_patches(patch_dict, strength_patch=strength, strength_model=1.0)
-            current = next_model
+            current = _load_and_patch(
+                current, lora_name, strength, auto_convert, edit_mode, balance,
+                node_label=f"FLUX LoRA Multi slot {i+1}",
+            )
 
         return (current,)
 
 
-# ── Quad Loader ───────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# NODE 3 — FluxLoraScheduled  (temporal scheduling, absorbs SetCondHooks)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-_QUAD_SLOTS = 4
-
-class FluxLoraQuad(FluxLoraLoader):
-    """
-    Apply up to 4 FLUX LoRAs with independent edit_mode and balance per slot.
-    Designed for editing workflows where different LoRAs need different protection.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        loras = ["None"] + folder_paths.get_filename_list("loras")
-        optional = {}
-        for i in range(1, _QUAD_SLOTS + 1):
-            optional[f"lora_{i}"]      = (loras,)
-            optional[f"strength_{i}"]  = ("FLOAT", {
-                "default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01,
-            })
-            optional[f"edit_mode_{i}"] = (PRESET_NAMES, {
-                "default": "None",
-                "tooltip": f"Edit preset for LoRA slot {i}.",
-            })
-            optional[f"balance_{i}"]   = ("FLOAT", {
-                "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
-                "tooltip": "0.0 = full preset, 1.0 = standard LoRA.",
-            })
-            optional[f"enabled_{i}"]   = ("BOOLEAN", {
-                "default": True, "label_on": "On", "label_off": "Off",
-            })
-            optional[f"convert_{i}"]   = ("BOOLEAN", {
-                "default": True, "label_on": "Auto-convert", "label_off": "Direct",
-            })
-        return {
-            "required": {"model": ("MODEL",)},
-            "optional": optional,
-        }
-
-    RETURN_TYPES = ("MODEL",)
-    FUNCTION = "load_loras"
-    CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX LoRA Quad"
-
-    def load_loras(self, model, **kwargs):
-        key_map = self._build_key_map(model)
-        current = model
-
-        for i in range(1, _QUAD_SLOTS + 1):
-            name      = kwargs.get(f"lora_{i}",      "None")
-            strength  = kwargs.get(f"strength_{i}",  1.0)
-            edit_mode = kwargs.get(f"edit_mode_{i}", "None")
-            balance   = kwargs.get(f"balance_{i}",   0.5)
-            enabled   = kwargs.get(f"enabled_{i}",   True)
-            convert   = kwargs.get(f"convert_{i}",   True)
-
-            if not enabled or name == "None" or strength == 0:
-                continue
-
-            lora_path = folder_paths.get_full_path("loras", name)
-            lora_sd   = comfy.utils.load_torch_file(lora_path, safe_load=True)
-            logger.info(f"[FLUX LoRA Quad] Slot {i}: {name}  ({len(lora_sd)} keys)")
-
-            if convert and self._is_diffusers_format(lora_sd):
-                lora_sd = self._convert_to_native(lora_sd)
-
-            # Per-slot edit-mode (supports Auto)
-            edit_preset_cfg = _resolve_edit_mode(
-                edit_mode, balance, lora_path, f"FLUX LoRA Quad] Slot {i}")
-            if edit_preset_cfg:
-                lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
-
-            patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
-            next_model = current.clone()
-            next_model.add_patches(patch_dict, strength_patch=strength, strength_model=1.0)
-            current = next_model
-
-        return (current,)
-
-
-# ── Scheduled Loader ──────────────────────────────────────────────────────────
-
-class FluxLoraScheduled(FluxLoraLoader):
+class FluxLoraScheduled:
     """
     Loads a FLUX LoRA with per-step strength scheduling via ComfyUI's Hook system.
 
@@ -742,8 +670,8 @@ class FluxLoraScheduled(FluxLoraLoader):
       - edit_mode: WHICH layers are affected (spatial)
       - schedule:  WHEN the LoRA is active (temporal)
 
-    Returns MODEL + HOOKS. The HOOKS output must be connected to conditioning
-    via a "Cond Pair Set Props" or "Set CLIP Hooks" node.
+    Absorbs FluxSetCondHooks: takes conditioning as input, returns modified
+    conditioning with hooks attached directly.
     """
 
     @classmethod
@@ -751,6 +679,7 @@ class FluxLoraScheduled(FluxLoraLoader):
         return {
             "required": {
                 "model": ("MODEL",),
+                "conditioning": ("CONDITIONING",),
                 "lora_name": (folder_paths.get_filename_list("loras"),),
                 "strength": ("FLOAT", {
                     "default": 1.0,
@@ -761,7 +690,7 @@ class FluxLoraScheduled(FluxLoraLoader):
                 }),
                 "schedule": (SCHEDULE_NAMES, {
                     "default": "Fade Out",
-                    "tooltip": "Strength curve over sampling steps. Fade Out = full effect at start, fades to zero.",
+                    "tooltip": "Strength curve over sampling steps.",
                 }),
             },
             "optional": {
@@ -785,40 +714,39 @@ class FluxLoraScheduled(FluxLoraLoader):
                     "default": 5,
                     "min": 2,
                     "max": 10,
-                    "tooltip": "Number of keyframes for the schedule. More = smoother but may cause minor hiccups.",
+                    "tooltip": "Number of keyframes for the schedule. More = smoother.",
                 }),
             },
         }
 
-    RETURN_TYPES = ("MODEL", "HOOKS")
-    RETURN_NAMES = ("model", "hooks")
+    RETURN_TYPES = ("MODEL", "CONDITIONING")
+    RETURN_NAMES = ("model", "conditioning")
     FUNCTION = "load_lora"
     CATEGORY = "loaders/FLUX"
     TITLE = "FLUX LoRA Scheduled"
 
-    def load_lora(self, model, lora_name, strength, schedule="Fade Out",
+    def load_lora(self, model, conditioning, lora_name, strength, schedule="Fade Out",
                   edit_mode="Auto", balance=0.5, auto_convert=True, keyframes=5):
         import comfy.hooks
 
         if strength == 0:
-            empty_hooks = comfy.hooks.HookGroup()
-            return (model, empty_hooks)
+            return (model, conditioning)
 
         lora_path = folder_paths.get_full_path("loras", lora_name)
         lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
         logger.info(f"[FLUX LoRA Scheduled] Loading: {lora_name}  ({len(lora_sd)} keys)")
 
-        if auto_convert and self._is_diffusers_format(lora_sd):
+        if auto_convert and _is_diffusers_format(lora_sd):
             logger.info("[FLUX LoRA Scheduled] Detected diffusers format — converting")
-            lora_sd = self._convert_to_native(lora_sd)
+            lora_sd = _convert_to_native(lora_sd)
 
         # Apply edit-mode multipliers (per-layer control)
         edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, "FLUX LoRA Scheduled")
         if edit_preset_cfg:
-            lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
+            lora_sd = _apply_edit_multipliers(lora_sd, edit_preset_cfg)
 
-        # Build patches via comfy.lora
-        key_map = self._build_key_map(model)
+        # Build patches
+        key_map = _build_key_map(model)
         patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
         logger.info(f"[FLUX LoRA Scheduled] {len(patch_dict)} patches, schedule='{schedule}', keyframes={keyframes}")
 
@@ -831,7 +759,6 @@ class FluxLoraScheduled(FluxLoraLoader):
         kf_group = build_keyframes(schedule, num_keyframes=keyframes)
         hook.hook_keyframe = kf_group
 
-        # Log the schedule
         for kf in kf_group.keyframes:
             logger.info(f"[FLUX LoRA Scheduled]   {kf.start_percent:.0%} → strength×{kf.strength:.2f}")
 
@@ -839,52 +766,24 @@ class FluxLoraScheduled(FluxLoraLoader):
         model_out = model.clone()
         model_out.add_hook_patches(hook=hook, patches=patch_dict, strength_patch=1.0)
 
-        return (model_out, hook_group)
+        # Absorb SetCondHooks: attach hooks to conditioning directly
+        cond_out = comfy.hooks.set_hooks_for_conditioning(conditioning, hook_group)
+
+        return (model_out, cond_out)
 
 
-# ── Hook utility ──────────────────────────────────────────────────────────────
-
-class FluxSetCondHooks:
-    """
-    Attaches HOOKS (from FluxLoraScheduled) to conditioning.
-    Required for per-step scheduling to work — hooks must be referenced
-    in the conditioning so the sampler knows to activate them.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "conditioning": ("CONDITIONING",),
-                "hooks": ("HOOKS",),
-            },
-        }
-
-    RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "set_hooks"
-    CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX Set Cond Hooks"
-
-    def set_hooks(self, conditioning, hooks):
-        import comfy.hooks
-        cond_out = comfy.hooks.set_hooks_for_conditioning(conditioning, hooks)
-        return (cond_out,)
-
-
-# ── Exports ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXPORTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 NODE_CLASS_MAPPINGS = {
     "FluxLoraLoader":    FluxLoraLoader,
-    "FluxLoraStack":     FluxLoraStack,
-    "FluxLoraQuad":      FluxLoraQuad,
+    "FluxLoraMulti":     FluxLoraMulti,
     "FluxLoraScheduled": FluxLoraScheduled,
-    "FluxSetCondHooks":  FluxSetCondHooks,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxLoraLoader":    "FLUX LoRA Loader",
-    "FluxLoraStack":     "FLUX LoRA Stack",
-    "FluxLoraQuad":      "FLUX LoRA Quad",
+    "FluxLoraMulti":     "FLUX LoRA Multi",
     "FluxLoraScheduled": "FLUX LoRA Scheduled",
-    "FluxSetCondHooks":  "FLUX Set Cond Hooks",
 }
