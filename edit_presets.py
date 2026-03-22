@@ -23,6 +23,7 @@ Values are multipliers relative to global_strength:
 
 N_DOUBLE = 8
 N_SINGLE = 24
+USE_CASE_NAMES = ["Edit", "Generate"]
 
 EDIT_PRESETS = {
     "None": None,
@@ -200,18 +201,25 @@ def merge_preset_over(base_cfg, preset_cfg):
     return merged
 
 
-def auto_select_preset(analysis):
+def auto_select_preset(analysis, use_case="Edit"):
     """
     Analyze ΔW norms from lora_meta.analyse_for_node() and pick the best
     preset + balance automatically.
 
-    Decision logic is intentionally conservative for edit workflows:
-      - strong late single-block dominance           → Preserve Body
-      - moderate late/mid single-block dominance     → Preserve Face
-      - image-heavy double blocks with calm singles  → Style Only
-      - full-coverage uniform LoRA                   → Preserve Face
-      - very soft / sparse structural LoRA           → None
-      - otherwise                                    → Preserve Face
+    Decision logic depends on the intended workflow:
+      Edit:
+        - strong late single-block dominance           → Preserve Body
+        - moderate late/mid single-block dominance     → Preserve Face
+        - image-heavy double blocks with calm singles  → Style Only
+        - full-coverage uniform LoRA                   → Preserve Face
+        - very soft / sparse structural LoRA           → None
+        - otherwise                                    → Preserve Face
+
+      Generate:
+        - strong late single-block dominance           → Preserve Face
+        - image-heavy double blocks with calm singles  → Style Only
+        - full-coverage / uniform LoRA                 → None
+        - otherwise                                    → None
 
     Balance is computed from max/mean ratio:
       - Higher concentration = lower balance (more protection needed)
@@ -251,6 +259,9 @@ def auto_select_preset(analysis):
                 sb_late.append(v)
 
     all_norms = db_norms + sb_early + sb_mid + sb_late
+    if use_case not in USE_CASE_NAMES:
+        use_case = "Edit"
+
     if not all_norms:
         return ("Preserve Face", 0.40)
 
@@ -273,27 +284,50 @@ def auto_select_preset(analysis):
     coverage_ratio = active_components / float(N_DOUBLE * 2 + N_SINGLE)
 
     # Pick preset
-    if late_ratio > 1.30 or (late_ratio > 1.20 and max_ratio > 1.35):
-        preset = "Preserve Body"
-    elif late_ratio > 1.08 or mid_ratio > 1.05:
-        preset = "Preserve Face"
-    elif img_txt_ratio > 1.18 and late_ratio < 1.00 and mid_ratio < 1.02:
-        preset = "Style Only"
-    elif coverage_ratio > 0.85:
-        preset = "Preserve Face"
-    elif db_ratio > 0.85 and late_ratio < 0.95 and max_ratio < 1.12:
-        preset = "None"
+    if use_case == "Generate":
+        if img_txt_ratio > 1.22 and late_ratio < 1.02 and mid_ratio < 1.05:
+            preset = "Style Only"
+        elif late_ratio > 1.35 or (late_ratio > 1.22 and max_ratio > 1.40):
+            preset = "Preserve Face"
+        elif coverage_ratio > 0.85 or (db_ratio > 0.82 and late_ratio < 1.05):
+            preset = "None"
+        else:
+            preset = "None"
     else:
-        preset = "Preserve Face"
+        if late_ratio > 1.30 or (late_ratio > 1.20 and max_ratio > 1.35):
+            preset = "Preserve Body"
+        elif late_ratio > 1.08 or mid_ratio > 1.05:
+            preset = "Preserve Face"
+        elif img_txt_ratio > 1.18 and late_ratio < 1.00 and mid_ratio < 1.02:
+            preset = "Style Only"
+        elif coverage_ratio > 0.85:
+            preset = "Preserve Face"
+        elif db_ratio > 0.85 and late_ratio < 0.95 and max_ratio < 1.12:
+            preset = "None"
+        else:
+            preset = "Preserve Face"
 
     # Pick balance: higher concentration → lower balance (more protection)
     # max_ratio 1.0–1.2 → balance ~0.55 (mild)
     # max_ratio 1.5–2.0 → balance ~0.25 (strong protection)
     balance = max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))
-    if preset == "None":
+    if use_case == "Generate" and preset == "None":
+        balance = max(balance, 0.50)
+    elif preset == "None":
         balance = max(balance, 0.55)
     elif preset == "Style Only":
         balance = max(balance, 0.35)
     balance = round(balance / 0.05) * 0.05  # snap to 0.05 grid
 
     return (preset, balance)
+
+
+def resolve_preset_selection(edit_mode, balance, analysis=None, use_case="Edit"):
+    """
+    Resolve a user-facing edit_mode into the preset name + balance to apply.
+
+    Manual modes ignore use_case; only Auto is use-case aware.
+    """
+    if edit_mode == "Auto":
+        return auto_select_preset(analysis or {}, use_case=use_case)
+    return (edit_mode, balance)

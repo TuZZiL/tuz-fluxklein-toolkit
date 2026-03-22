@@ -14,7 +14,7 @@
 //   Drag bar up/down  → set strength
 //   Click bar         → toggle between 0 and last non-zero value
 //   Shift-drag        → move all visible blocks together (within section)
-//   Buttons: Reset All | Mirror img→txt | Flatten (all → global)
+//   Buttons: Reset | Match global | Protect Face | Protect Body | Style Bias
 //
 // Serializes to hidden `layer_strengths` widget as JSON:
 //   {
@@ -70,6 +70,48 @@ function defaultStrengths() {
     for (let i = 0; i < N_SINGLE; i++) sb[i] = 1.0;
     return { db, sb };
 }
+
+const GRAPH_PRESETS = {
+    face: {
+        db: {
+            0: { img: 1.0, txt: 0.90 }, 1: { img: 1.0, txt: 0.90 },
+            2: { img: 1.0, txt: 0.90 }, 3: { img: 1.0, txt: 0.90 },
+            4: { img: 1.0, txt: 0.85 }, 5: { img: 1.0, txt: 0.85 },
+            6: { img: 1.0, txt: 0.85 }, 7: { img: 1.0, txt: 0.85 },
+        },
+        sb: {
+            0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 0.95, 7: 0.95,
+            8: 0.90, 9: 0.85, 10: 0.80, 11: 0.75, 12: 0.65, 13: 0.60, 14: 0.55, 15: 0.50,
+            16: 0.45, 17: 0.40, 18: 0.38, 19: 0.35, 20: 0.33, 21: 0.32, 22: 0.30, 23: 0.30,
+        },
+    },
+    body: {
+        db: {
+            0: { img: 1.0, txt: 0.85 }, 1: { img: 1.0, txt: 0.85 },
+            2: { img: 1.0, txt: 0.85 }, 3: { img: 1.0, txt: 0.85 },
+            4: { img: 1.0, txt: 0.80 }, 5: { img: 1.0, txt: 0.80 },
+            6: { img: 1.0, txt: 0.80 }, 7: { img: 1.0, txt: 0.80 },
+        },
+        sb: {
+            0: 1.0, 1: 1.0, 2: 1.0, 3: 0.95, 4: 0.75, 5: 0.72, 6: 0.70, 7: 0.68,
+            8: 0.65, 9: 0.62, 10: 0.60, 11: 0.55, 12: 0.50, 13: 0.47, 14: 0.44, 15: 0.40,
+            16: 0.38, 17: 0.35, 18: 0.33, 19: 0.32, 20: 0.30, 21: 0.30, 22: 0.30, 23: 0.30,
+        },
+    },
+    style: {
+        db: {
+            0: { img: 0.40, txt: 1.0 }, 1: { img: 0.40, txt: 1.0 },
+            2: { img: 0.45, txt: 1.0 }, 3: { img: 0.45, txt: 1.0 },
+            4: { img: 0.50, txt: 1.0 }, 5: { img: 0.50, txt: 1.0 },
+            6: { img: 0.55, txt: 1.0 }, 7: { img: 0.55, txt: 1.0 },
+        },
+        sb: {
+            0: 1.0, 1: 1.0, 2: 1.0, 3: 0.95, 4: 0.90, 5: 0.85, 6: 0.80, 7: 0.75,
+            8: 0.70, 9: 0.65, 10: 0.60, 11: 0.55, 12: 0.50, 13: 0.45, 14: 0.40, 15: 0.38,
+            16: 0.35, 17: 0.33, 18: 0.30, 19: 0.30, 20: 0.30, 21: 0.30, 22: 0.30, 23: 0.30,
+        },
+    },
+};
 
 app.registerExtension({
     name: "Comfy.FluxLoraGraph",
@@ -229,6 +271,51 @@ app.registerExtension({
                 return W("strength")?.value ?? 1.0;
             }
 
+            function graphBaseStrength() {
+                return Math.max(0.0, Math.abs(globalStrength()));
+            }
+
+            function rememberCurrentAsLast() {
+                for (let i = 0; i < N_DOUBLE; i++) {
+                    if (strengths.db[i].img > 0.001) lastDb[i].img = strengths.db[i].img;
+                    if (strengths.db[i].txt > 0.001) lastDb[i].txt = strengths.db[i].txt;
+                }
+                for (let i = 0; i < N_SINGLE; i++) {
+                    if (strengths.sb[i] > 0.001) lastSb[i] = strengths.sb[i];
+                }
+            }
+
+            function applyGraphPreset(kind) {
+                if (kind === "reset") {
+                    strengths = defaultStrengths();
+                    rememberCurrentAsLast();
+                    return;
+                }
+
+                const gs = graphBaseStrength();
+                if (kind === "global") {
+                    for (let i = 0; i < N_DOUBLE; i++) {
+                        strengths.db[i].img = gs;
+                        strengths.db[i].txt = gs;
+                    }
+                    for (let i = 0; i < N_SINGLE; i++) strengths.sb[i] = gs;
+                    rememberCurrentAsLast();
+                    return;
+                }
+
+                const mask = GRAPH_PRESETS[kind];
+                if (!mask) return;
+                for (let i = 0; i < N_DOUBLE; i++) {
+                    const cfg = mask.db[i];
+                    strengths.db[i].img = clamp(gs * cfg.img, STR_MIN, STR_MAX);
+                    strengths.db[i].txt = clamp(gs * cfg.txt, STR_MIN, STR_MAX);
+                }
+                for (let i = 0; i < N_SINGLE; i++) {
+                    strengths.sb[i] = clamp(gs * mask.sb[i], STR_MIN, STR_MAX);
+                }
+                rememberCurrentAsLast();
+            }
+
             function hitTest(mx, my, gX, gW, gY, gH) {
                 if (mx < gX || mx > gX + gW || my < gY || my > gY + gH) return null;
                 const rel = mx - gX;
@@ -281,20 +368,25 @@ app.registerExtension({
                     // ── Button row ─────────────────────────────────────────────
                     const bY  = y + PAD;
                     const bH  = BTN_ROW_H - 4;
-                    const btnW = iW * 0.3;
+                    const btnGap = 6;
+                    const btnW = (iW - btnGap * 4) / 5;
                     const btns = [
-                        { key: "reset",   label: "↺ Reset",          x: PAD              },
-                        { key: "mirror",  label: "Copy img→txt",     x: PAD + iW * 0.34  },
-                        { key: "flatten", label: "Match global",     x: PAD + iW * 0.62  },
+                        { key: "reset",  label: "Reset" },
+                        { key: "global", label: "Global" },
+                        { key: "face",   label: "Face" },
+                        { key: "body",   label: "Body" },
+                        { key: "style",  label: "Style" },
                     ];
-                    btns.forEach(btn => {
+                    btns.forEach((btn, idx) => {
+                        const btnX = PAD + idx * (btnW + btnGap);
                         _btnBounds[btn.key] = { ...btn, w: btnW, h: bH, y: bY };
-                        roundRect(ctx, btn.x, bY, btnW, bH, 3);
+                        _btnBounds[btn.key].x = btnX;
+                        roundRect(ctx, btnX, bY, btnW, bH, 3);
                         ctx.fillStyle   = "#1a1a2e"; ctx.fill();
                         ctx.strokeStyle = "#3a3a5a"; ctx.lineWidth = 1; ctx.stroke();
                         ctx.fillStyle   = "#6655aa"; ctx.font = "bold 9px monospace";
                         ctx.textAlign   = "center";
-                        ctx.fillText(btn.label, btn.x + btnW / 2, bY + bH * 0.68);
+                        ctx.fillText(btn.label, btnX + btnW / 2, bY + bH * 0.68);
                     });
                     ctx.textAlign = "left";
 
@@ -557,17 +649,7 @@ app.registerExtension({
                     if (event.type === "pointerdown") {
                         for (const [key, b] of Object.entries(_btnBounds)) {
                             if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-                                if (key === "reset") {
-                                    strengths = defaultStrengths();
-                                } else if (key === "mirror") {
-                                    for (let i = 0; i < N_DOUBLE; i++) strengths.db[i].txt = strengths.db[i].img;
-                                } else if (key === "flatten") {
-                                    for (let i = 0; i < N_DOUBLE; i++) {
-                                        strengths.db[i].img = gs;
-                                        strengths.db[i].txt = gs;
-                                    }
-                                    for (let i = 0; i < N_SINGLE; i++) strengths.sb[i] = gs;
-                                }
+                                applyGraphPreset(key);
                                 syncWidget();
                                 node.setDirtyCanvas(true, true);
                                 return true;

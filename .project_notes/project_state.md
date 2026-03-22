@@ -73,9 +73,11 @@ transformer.transformer_blocks.0.attn.to_q.lora.down.weight
 
 ### 1. FluxLoraLoader — single LoRA з повним контролем
 - Інтерактивний граф-віджет (per-layer strength bars)
+- `use_case`: `Edit` / `Generate` — окрема вісь поведінки для `Auto`
 - `auto_strength` toggle — автоматичний розрахунок per-layer strengths через ΔW аналіз
 - `auto_strength` тепер шле layer JSON назад у frontend і заповнює граф автоматично
 - compatibility badge `Compat X/Y` прямо на graph widget + деталі в логах
+- graph preset buttons: `Reset`, `Global`, `Face`, `Body`, `Style`
 - edit_mode dropdown (6 пресетів + Auto) + balance slider
 - Підтримує всі 4 формати/варіанти LoRA
 - Edit presets застосовуються і до native `lora_up/lora_down`, не лише до `.lora_B`
@@ -83,13 +85,16 @@ transformer.transformer_blocks.0.attn.to_q.lora.down.weight
 
 ### 2. FluxLoraMulti — dynamic multi-slot (rgthree-style)
 - "+" Add LoRA кнопка для додавання слотів
-- Per-slot: enabled, lora, strength, edit_mode, balance
+- Per-slot: enabled, lora, strength, `use_case`, edit_mode, balance
+- Duplicate / Collapse / Reorder (`up/down`) прямо в header слота
 - Fully JS-driven slots — slot_data серіалізується як JSON
+- `collapsed` теж серіалізується в slot_data і відновлюється після reload
 - Замінює Stack + Quad
 
 ### 3. FluxLoraScheduled — per-step temporal scheduling
 - Використовує ComfyUI Hook Keyframes (native API)
 - Приймає MODEL + CONDITIONING, повертає MODEL + CONDITIONING
+- Має `use_case`: `Edit` / `Generate` для `Auto` пресету
 - Вбудований SetCondHooks — хуки прикріплюються до conditioning автоматично
 - 5 профілів: Constant, Fade Out, Fade In, Strong Start, Pulse
 
@@ -104,9 +109,9 @@ transformer.transformer_blocks.0.attn.to_q.lora.down.weight
 
 ## Auto-Preset евристика (edit_presets.py → auto_select_preset)
 
-Поточна евристика стала **консервативнішою для edit workflow** і менше схильна віддавати `None` для broad/full-coverage t2i LoRA.
+Поточна евристика стала **use-case aware**: `Edit` і `Generate` мають різну філософію вибору `Auto`.
 
-Аналізує `analyse_for_node()` результат і обирає пресет:
+### `use_case = Edit`
 - сильна домінація пізніх `single_blocks` → `Preserve Body`
 - помірна домінація late/mid `single_blocks` → `Preserve Face`
 - `img >> txt` у double blocks при спокійних singles → `Style Only`
@@ -114,15 +119,23 @@ transformer.transformer_blocks.0.attn.to_q.lora.down.weight
 - дуже м’яка / sparse structural LoRA → `None`
 - інакше → `Preserve Face`
 
+### `use_case = Generate`
+- style-like (`img >> txt`, calm singles) → `Style Only`
+- дуже aggressive late profile → `Preserve Face`
+- broad / full-coverage / uniform LoRA → `None`
+- інакше → `None`
+
 Balance = `max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))`
 
 Додатково:
 - для `None` balance піднімається мінімум до `0.55`
 - для `Style Only` balance піднімається мінімум до `0.35`
+- для `Generate + None` balance піднімається мінімум до `0.50`
 
 Практичний ефект:
 - broad text2image LoRA, які юзер застосовує в editing, тепер рідше класифікуються як `None`
 - `Auto` краще страхує reference/identity без окремих warning'ів у UI
+- той самий файл LoRA може поводитись вільніше в text-to-image і консервативніше в edit workflow
 
 ---
 
@@ -150,9 +163,15 @@ ComfyUI-GGUF (city96) повністю сумісний:
 
 6. **Compatibility report**: Loader будує inventory complete/incomplete LoRA modules, звіряє їх з `key_map`, логуючи `matched/skipped/incomplete`, і показує компактний badge в Loader UI.
 
-7. **Auto-strength UI sync**: Loader використовує hidden `UNIQUE_ID` і `PromptServer.send_sync("flux_lora.auto_strength", ...)`, а фронтенд оновлює hidden `layer_strengths` widget і граф без ручного refresh.
+7. **Use case routing**: `use_case` проходить через Loader, Scheduled і per-slot Multi, впливаючи тільки на `edit_mode=Auto`; ручні пресети не залежать від нього.
 
-8. **Repo metadata alignment**: `pyproject.toml` і publish workflow вирівняні під фактичний `origin` (`TuZZiL`). `PublisherId` поки залишено як `capitan01r`, бо це може бути окремий Comfy Registry ідентифікатор.
+8. **Graph preset masks**: кнопки `Face` / `Body` / `Style` пишуть прямо в `layer_strengths` і повторно використовують shape існуючих пресетів без нового storage format.
+
+9. **Multi rerender strategy**: `FluxLoraMulti` тепер перебудовує slot widgets із `node._slots`, що спрощує duplicate/collapse/reorder і гарантує коректне restore після workflow reload.
+
+10. **Auto-strength UI sync**: Loader використовує hidden `UNIQUE_ID` і `PromptServer.send_sync("flux_lora.auto_strength", ...)`, а фронтенд оновлює hidden `layer_strengths` widget і граф без ручного refresh.
+
+11. **Repo metadata alignment**: `pyproject.toml` і publish workflow вирівняні під фактичний `origin` (`TuZZiL`). `PublisherId` поки залишено як `capitan01r`, бо це може бути окремий Comfy Registry ідентифікатор.
 
 ---
 
@@ -164,6 +183,9 @@ ComfyUI-GGUF (city96) повністю сумісний:
 - Додано compatibility report + badge `Compat X/Y` у `FluxLoraLoader`
 - Додано in-memory cache для `analyse_for_node()`
 - Зроблено `Auto` більш консервативним для broad text2image LoRA в edit use-case
+- Додано `use_case = Edit / Generate` у Loader + Scheduled і per-slot у Multi
+- Додано graph preset buttons: `Reset`, `Global`, `Face`, `Body`, `Style`
+- Додано `Duplicate / Collapse / Reorder` у `FluxLoraMulti`
 - Вирівняно repo URL metadata і GitHub publish owner check під `TuZZiL`
 
 ---
@@ -186,10 +208,14 @@ ComfyUI-GGUF (city96) повністю сумісний:
 - [x] Додати compatibility report у Loader
 - [x] Додати cache для `analyse_for_node()`
 - [x] Зробити `Auto` консервативнішим для t2i LoRA в editing
+- [x] Додати `use_case = Edit / Generate` у всі 3 ноди
+- [x] Додати graph preset buttons у Loader
+- [x] Додати Duplicate / Collapse / Reorder у `FluxLoraMulti`
 - [x] Узгодити repo metadata (`README`/`pyproject`/workflow) з фактичним remote
-- [ ] Протестувати FluxLoraMulti JS widget в ComfyUI (add/remove/save/restore)
+- [ ] Протестувати FluxLoraMulti JS widget в ComfyUI (duplicate/collapse/reorder/save/restore)
 - [ ] Емпірично протестувати пресети та scheduling на реальних генераціях
 - [ ] Перевірити нову `Auto` евристику на реальних t2i LoRA у ComfyUI edit workflow
+- [ ] Перевірити `use_case=Generate` vs `Edit` на реальних LoRA в Loader / Multi / Scheduled
 - [ ] Перевірити FluxLoraScheduled з GGUF (hook patches + dequantization)
 - [ ] Оновити gen_workflow.py під нову структуру нод
 - [ ] Оновити README.md та README_UA.md

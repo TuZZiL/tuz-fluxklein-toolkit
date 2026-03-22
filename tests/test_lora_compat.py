@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import lora_meta
-from edit_presets import auto_select_preset
+from edit_presets import auto_select_preset, resolve_preset_selection
 from lora_compat import build_compatibility_report, normalize_lora_key, parse_lora_key
 
 
@@ -90,18 +90,24 @@ class LoraCompatTests(unittest.TestCase):
                 self.assertEqual(first, third)
 
     def test_auto_select_preset_prefers_preserve_face_for_uniform_full_coverage(self):
-        preset, balance = auto_select_preset(self.make_analysis())
+        preset, balance = auto_select_preset(self.make_analysis(), use_case="Edit")
         self.assertEqual(preset, "Preserve Face")
         self.assertGreaterEqual(balance, 0.2)
 
     def test_auto_select_preset_picks_style_only_for_image_heavy_profile(self):
         sb = [0.92] * 24
-        preset, _ = auto_select_preset(self.make_analysis(db_img=1.35, db_txt=0.95, sb_values=sb))
+        preset, _ = auto_select_preset(
+            self.make_analysis(db_img=1.35, db_txt=0.95, sb_values=sb),
+            use_case="Edit",
+        )
         self.assertEqual(preset, "Style Only")
 
     def test_auto_select_preset_picks_preserve_body_for_late_heavy_profile(self):
         sb = [0.75] * 8 + [0.95] * 8 + [1.75] * 8
-        preset, _ = auto_select_preset(self.make_analysis(db_img=0.95, db_txt=0.95, sb_values=sb))
+        preset, _ = auto_select_preset(
+            self.make_analysis(db_img=0.95, db_txt=0.95, sb_values=sb),
+            use_case="Edit",
+        )
         self.assertEqual(preset, "Preserve Body")
 
     def test_auto_select_preset_keeps_none_for_sparse_soft_structural_profile(self):
@@ -115,9 +121,28 @@ class LoraCompatTests(unittest.TestCase):
             "alpha": None,
             "layer_stats": [],
         }
-        preset, balance = auto_select_preset(analysis)
+        preset, balance = auto_select_preset(analysis, use_case="Edit")
         self.assertEqual(preset, "None")
         self.assertGreaterEqual(balance, 0.55)
+
+    def test_auto_select_preset_generate_prefers_none_for_uniform_full_coverage(self):
+        preset, balance = auto_select_preset(self.make_analysis(), use_case="Generate")
+        self.assertEqual(preset, "None")
+        self.assertGreaterEqual(balance, 0.50)
+
+    def test_auto_select_preset_generate_softens_late_heavy_to_preserve_face(self):
+        sb = [0.75] * 8 + [0.95] * 8 + [1.75] * 8
+        preset, _ = auto_select_preset(
+            self.make_analysis(db_img=0.95, db_txt=0.95, sb_values=sb),
+            use_case="Generate",
+        )
+        self.assertEqual(preset, "Preserve Face")
+
+    def test_manual_preset_resolution_ignores_use_case(self):
+        preset_edit = resolve_preset_selection("Style Only", 0.35, use_case="Edit")
+        preset_generate = resolve_preset_selection("Style Only", 0.35, use_case="Generate")
+        self.assertEqual(preset_edit, ("Style Only", 0.35))
+        self.assertEqual(preset_generate, ("Style Only", 0.35))
 
 
 if __name__ == "__main__":

@@ -50,7 +50,13 @@ import comfy.lora
 import folder_paths
 import logging
 
-from .edit_presets import EDIT_PRESETS, PRESET_NAMES, interpolate_preset, auto_select_preset
+from .edit_presets import (
+    EDIT_PRESETS,
+    PRESET_NAMES,
+    USE_CASE_NAMES,
+    interpolate_preset,
+    resolve_preset_selection,
+)
 from .lora_compat import normalize_lora_keys, build_compatibility_report
 from .schedules import SCHEDULE_NAMES, build_keyframes
 
@@ -429,27 +435,39 @@ def _send_compatibility_report(node_id, report, applied_modules=None):
 
 # ── Edit-mode resolution ─────────────────────────────────────────────────────
 
-def _resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA"):
+def _resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA", use_case="Edit"):
     """Resolve edit_mode (including Auto) into a preset config or None."""
     if edit_mode == "None":
         return None
     if edit_mode == "Auto":
         from .lora_meta import analyse_for_node
         analysis = analyse_for_node(lora_path)
-        auto_preset, auto_balance = auto_select_preset(analysis)
+        auto_preset, auto_balance = resolve_preset_selection(
+            edit_mode, balance, analysis=analysis, use_case=use_case
+        )
         if auto_preset == "None":
-            logger.info(f"[{node_label}] Auto → None (LoRA is safe, no preset needed)")
+            logger.info(
+                f"[{node_label}] Auto({use_case}) → None"
+                " (LoRA can run without extra protection)"
+            )
             return None
         preset_raw = EDIT_PRESETS.get(auto_preset)
         if preset_raw is not None:
             cfg = interpolate_preset(preset_raw, auto_balance)
-            logger.info(f"[{node_label}] Auto → {auto_preset} (balance={auto_balance:.2f})")
+            logger.info(
+                f"[{node_label}] Auto({use_case}) → {auto_preset}"
+                f" (balance={auto_balance:.2f})"
+            )
             return cfg
         return None
-    preset_raw = EDIT_PRESETS.get(edit_mode)
+    preset_name, resolved_balance = resolve_preset_selection(edit_mode, balance, use_case=use_case)
+    preset_raw = EDIT_PRESETS.get(preset_name)
     if preset_raw is not None:
-        cfg = interpolate_preset(preset_raw, balance)
-        logger.info(f"[{node_label}] Edit mode '{edit_mode}' applied (balance={balance:.2f})")
+        cfg = interpolate_preset(preset_raw, resolved_balance)
+        logger.info(
+            f"[{node_label}] Edit mode '{preset_name}' applied"
+            f" (balance={resolved_balance:.2f})"
+        )
         return cfg
     return None
 
@@ -505,6 +523,7 @@ def _compute_strengths(analysis, global_strength):
 # ── Unified load-and-patch helper ─────────────────────────────────────────────
 
 def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance,
+                    use_case="Edit",
                     layer_cfg=None, auto_strength=False, node_label="FLUX LoRA",
                     node_id=None):
     """
@@ -538,7 +557,7 @@ def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance
                 logger.exception(f"[{node_label}] Failed to send auto-strength update to UI")
 
     # Resolve edit-mode preset
-    edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, node_label)
+    edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, node_label, use_case=use_case)
 
     # Convert format if needed
     if auto_convert and _is_diffusers_format(lora_sd):
@@ -590,6 +609,10 @@ class FluxLoraLoader:
                     "max": 5.0,
                     "step": 0.01,
                 }),
+                "use_case": (USE_CASE_NAMES, {
+                    "default": "Edit",
+                    "tooltip": "Edit = reference-preserving Auto behavior. Generate = freer text-to-image Auto behavior.",
+                }),
                 "auto_convert": ("BOOLEAN", {
                     "default": True,
                     "label_on": "Auto-convert diffusers→native",
@@ -627,7 +650,7 @@ class FluxLoraLoader:
     CATEGORY = "loaders/FLUX"
     TITLE = "FLUX LoRA Loader"
 
-    def load_lora(self, model, lora_name, strength,
+    def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
                   edit_mode="None", balance=0.5, node_id=None):
         if strength == 0:
@@ -643,7 +666,7 @@ class FluxLoraLoader:
             pass
 
         model_out = _load_and_patch(
-            model, lora_name, strength, auto_convert, edit_mode, balance,
+            model, lora_name, strength, auto_convert, edit_mode, balance, use_case,
             layer_cfg=layer_cfg, auto_strength=auto_strength,
             node_label="FLUX LoRA Loader", node_id=node_id,
         )
@@ -658,7 +681,7 @@ class FluxLoraMulti:
     """
     Dynamic multi-LoRA loader with per-slot control.
     Slots are managed by JS widget (+ Add LoRA / ✕ Remove).
-    Each slot has: enabled, lora, strength, edit_mode, balance.
+    Each slot has: enabled, lora, strength, use_case, edit_mode, balance.
     """
 
     @classmethod
@@ -704,6 +727,7 @@ class FluxLoraMulti:
             enabled   = slot.get("enabled", True)
             lora_name = slot.get("lora", "None")
             strength  = slot.get("strength", 1.0)
+            use_case  = slot.get("use_case", "Edit")
             edit_mode = slot.get("edit_mode", "None")
             balance   = slot.get("balance", 0.5)
 
@@ -711,7 +735,7 @@ class FluxLoraMulti:
                 continue
 
             current = _load_and_patch(
-                current, lora_name, strength, auto_convert, edit_mode, balance,
+                current, lora_name, strength, auto_convert, edit_mode, balance, use_case,
                 node_label=f"FLUX LoRA Multi slot {i+1}",
             )
 
@@ -750,6 +774,10 @@ class FluxLoraScheduled:
                     "step": 0.01,
                     "tooltip": "Base LoRA strength. The schedule multiplies this value.",
                 }),
+                "use_case": (USE_CASE_NAMES, {
+                    "default": "Edit",
+                    "tooltip": "Edit = reference-preserving Auto behavior. Generate = freer text-to-image Auto behavior.",
+                }),
                 "schedule": (SCHEDULE_NAMES, {
                     "default": "Fade Out",
                     "tooltip": "Strength curve over sampling steps.",
@@ -787,7 +815,7 @@ class FluxLoraScheduled:
     CATEGORY = "loaders/FLUX"
     TITLE = "FLUX LoRA Scheduled"
 
-    def load_lora(self, model, conditioning, lora_name, strength, schedule="Fade Out",
+    def load_lora(self, model, conditioning, lora_name, strength, use_case="Edit", schedule="Fade Out",
                   edit_mode="Auto", balance=0.5, auto_convert=True, keyframes=5):
         import comfy.hooks
 
@@ -803,7 +831,9 @@ class FluxLoraScheduled:
             lora_sd = _convert_to_native(lora_sd)
 
         # Apply edit-mode multipliers (per-layer control)
-        edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, "FLUX LoRA Scheduled")
+        edit_preset_cfg = _resolve_edit_mode(
+            edit_mode, balance, lora_path, "FLUX LoRA Scheduled", use_case=use_case
+        )
         if edit_preset_cfg:
             lora_sd = _apply_edit_multipliers(lora_sd, edit_preset_cfg)
 
