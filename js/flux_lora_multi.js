@@ -272,7 +272,12 @@ app.registerExtension({
                             data.enabled = v;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
-                        }, { on: "On", off: "Off", serialize: false });
+                        }, {
+                            on: "On",
+                            off: "Off",
+                            serialize: false,
+                            tooltip: "Turns this LoRA slot on or off without removing its settings.",
+                        });
                         moveWidgetTo(node, enabledW, insertAt++);
                         group.push(enabledW);
 
@@ -280,7 +285,11 @@ app.registerExtension({
                             data.lora = v;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
-                        }, { values: loraValues, serialize: false });
+                        }, {
+                            values: loraValues,
+                            serialize: false,
+                            tooltip: "Which LoRA file to load in this slot.",
+                        });
                         moveWidgetTo(node, loraW, insertAt++);
                         group.push(loraW);
 
@@ -288,7 +297,14 @@ app.registerExtension({
                             data.strength = v;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
-                        }, { min: -5.0, max: 5.0, step: 0.05, precision: 2, serialize: false });
+                        }, {
+                            min: -5.0,
+                            max: 5.0,
+                            step: 0.05,
+                            precision: 2,
+                            serialize: false,
+                            tooltip: "Overall LoRA strength for this slot. Lower it first if the edit is too aggressive.",
+                        });
                         moveWidgetTo(node, strengthW, insertAt++);
                         group.push(strengthW);
 
@@ -296,7 +312,11 @@ app.registerExtension({
                             data.use_case = v;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
-                        }, { values: USE_CASES, serialize: false });
+                        }, {
+                            values: USE_CASES,
+                            serialize: false,
+                            tooltip: "Tells Auto whether this slot should protect a reference image more (Edit) or allow freer generation (Generate).",
+                        });
                         moveWidgetTo(node, useCaseW, insertAt++);
                         group.push(useCaseW);
 
@@ -304,7 +324,11 @@ app.registerExtension({
                             data.edit_mode = v;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
-                        }, { values: EDIT_MODES, serialize: false });
+                        }, {
+                            values: EDIT_MODES,
+                            serialize: false,
+                            tooltip: "How protective this slot should be. Auto is the safest starting point; None means raw LoRA behavior.",
+                        });
                         moveWidgetTo(node, editW, insertAt++);
                         group.push(editW);
 
@@ -312,7 +336,14 @@ app.registerExtension({
                             data.balance = v;
                             syncSlotData();
                             node.setDirtyCanvas(true, true);
-                        }, { min: 0.0, max: 1.0, step: 0.05, precision: 2, serialize: false });
+                        }, {
+                            min: 0.0,
+                            max: 1.0,
+                            step: 0.05,
+                            precision: 2,
+                            serialize: false,
+                            tooltip: "How strongly to apply the chosen mode. Lower = safer / more preserving. Higher = closer to raw LoRA.",
+                        });
                         moveWidgetTo(node, balanceW, insertAt++);
                         group.push(balanceW);
                     }

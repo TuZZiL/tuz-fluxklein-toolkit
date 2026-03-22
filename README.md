@@ -63,10 +63,11 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 | `model` | MODEL | FLUX.2 Klein / FLUX.1 model |
 | `lora_name` | dropdown | LoRA file from `models/loras` |
 | `strength` | float | Global LoRA strength (-5.0 to 5.0) |
+| `use_case` | dropdown | Tells Auto whether you are editing a reference image or doing freer generation |
 | `auto_convert` | boolean | Convert diffusers-format LoRAs to native FLUX format |
-| `auto_strength` | boolean | When ON: auto-compute per-layer strengths from ΔW analysis |
-| `edit_mode` | dropdown | Semantic edit preset (see below) |
-| `balance` | float | 0.0 = full preset effect, 1.0 = standard LoRA |
+| `auto_strength` | boolean | When ON: normalize uneven LoRAs by auto-computing per-layer strengths from ΔW analysis |
+| `edit_mode` | dropdown | How protective the loader should be; `Auto` is the recommended starting point |
+| `balance` | float | 0.0 = strongest preset effect, 1.0 = raw LoRA behavior |
 
 **Graph widget:** Shows double blocks (8 columns, img purple / txt teal, split top/bottom) and single blocks (24 columns, green). Drag to adjust. Shift-drag moves all bars in a section. Click to toggle a bar on/off.
 
@@ -80,6 +81,7 @@ Each slot has:
 - **Enabled** toggle
 - **LoRA** dropdown
 - **Strength** (-5.0 to 5.0)
+- **Use case** (Edit or Generate)
 - **Edit mode** (None, Preserve Face, Preserve Body, Style Only, Edit Subject, Boost Prompt, Auto)
 - **Balance** (0.0 to 1.0)
 
@@ -105,9 +107,10 @@ Slot 3: enhancer LoRA      → edit_mode=Auto (or None),          strength=0.2-0
 | `conditioning` | CONDITIONING | Base conditioning (hooks attached automatically) |
 | `lora_name` | dropdown | LoRA file |
 | `strength` | float | Base LoRA strength (0.0 to 2.0) |
+| `use_case` | dropdown | Tells Auto whether to prioritize reference preservation or freer generation |
 | `schedule` | dropdown | Strength curve profile |
-| `edit_mode` | dropdown | Semantic edit preset (supports Auto) |
-| `balance` | float | Preset balance (0.0 to 1.0) |
+| `edit_mode` | dropdown | How protective the loader should be (supports Auto) |
+| `balance` | float | 0.0 = strongest preset effect, 1.0 = raw LoRA behavior |
 | `keyframes` | int | Number of keyframes (2-10, default 5) |
 
 **Returns:** `MODEL` + `CONDITIONING`
@@ -129,6 +132,13 @@ Available schedules:
 
 ## Edit Mode Presets
 
+Think of `edit_mode` as a **protection level**, not as a category label for the LoRA itself. Different edit LoRAs can belong to the same practical bucket:
+
+- Some LoRAs mostly change clothing, accessories, or makeup
+- Some push pose, body shape, or camera changes much harder
+- Some are really style LoRAs that people reuse in image editing
+- Some are consistency / enhancer LoRAs that already behave well without protection
+
 When using LoRAs for image editing (e.g., changing clothing on a reference photo), the LoRA can corrupt parts of the image you want to preserve — most commonly the face/identity. This happens because FLUX.2 Klein processes image and text in different ways across its layers:
 
 - **Double blocks (0-7):** Image and text streams are isolated — they can't cause text-driven image corruption on their own.
@@ -146,6 +156,26 @@ When using LoRAs for image editing (e.g., changing clothing on a reference photo
 | **Boost Prompt** | Strengthens txt stream and mid single blocks | When the prompt isn't being followed strongly enough |
 | **Auto** | Analyzes LoRA weights, picks best preset + balance automatically | Zero-config — recommended for most users |
 
+### Which Mode To Start With
+
+| If your LoRA feels like... | Start with | Why |
+|---|---|---|
+| Clothing / accessories / hair / makeup edit | **Auto** or **Preserve Face** | Usually keeps identity steadier while still allowing local edits |
+| Outfit replacement / try-on / body-sensitive edit | **Auto** or **Preserve Body** | Best when face, silhouette, or proportions drift too much |
+| Style / aesthetic / painterly look | **Auto** or **Style Only** | Lets the look change while reducing structural rewrites |
+| Consistency / enhancer / "fixer" LoRA | **None** or **Auto** | These often behave well already and do not need extra protection |
+| Prompt feels weak or the LoRA is under-following | **Boost Prompt** | Gives text-driven changes more authority |
+| You intentionally want the LoRA to freely change face/body | **None** | Raw LoRA behavior, no protection layer applied |
+
+### Use Case: Edit vs Generate
+
+`use_case` only affects **Auto**. Manual modes always behave exactly as selected.
+
+- **Edit**: Best for reference-driven image editing. Auto will be more conservative and favor identity / structure preservation.
+- **Generate**: Best for text-to-image, loose restyling, or when there is no strong reference image to protect. Auto will allow more raw LoRA behavior.
+
+This matters because Klein edit LoRAs are not all the same. A style LoRA, a clothing edit LoRA, and a consistency LoRA can all be valid on Klein, but they benefit from different starting assumptions.
+
 ### Auto Mode
 
 When `edit_mode` is set to **Auto**, the node analyzes each LoRA's weight distribution and selects the optimal preset:
@@ -153,6 +183,8 @@ When `edit_mode` is set to **Auto**, the node analyzes each LoRA's weight distri
 - High training signal in late single blocks (editing LoRAs) → **Preserve Body**
 - Moderate late-block signal → **Preserve Face**
 - Uniform distribution (sliders, enhancers) → **None**
+
+Auto is a strong starting point, but it still cannot read user intent. If you want to deliberately change pose, face, or body, switch to **None** or raise `balance` toward `1.0`.
 
 The balance is also computed automatically based on signal concentration. Console logs show which preset was selected:
 ```
@@ -166,6 +198,10 @@ The `balance` slider interpolates between the preset and standard behavior:
 - **0.0** — full preset effect (maximum protection/boost)
 - **0.5** — halfway between preset and standard
 - **1.0** — standard LoRA (preset has no effect)
+
+Practical rule of thumb:
+- Lower `balance` if the LoRA keeps overwriting the face, body, or reference structure.
+- Raise `balance` if the edit feels too weak or too "safe".
 
 ## How Auto Strength Works
 

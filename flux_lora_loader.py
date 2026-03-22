@@ -608,15 +608,17 @@ class FluxLoraLoader:
                     "min": -5.0,
                     "max": 5.0,
                     "step": 0.01,
+                    "tooltip": "Overall LoRA strength. Lower it first if the edit is too aggressive; raise it if the LoRA feels too weak.",
                 }),
                 "use_case": (USE_CASE_NAMES, {
                     "default": "Edit",
-                    "tooltip": "Edit = reference-preserving Auto behavior. Generate = freer text-to-image Auto behavior.",
+                    "tooltip": "Tells Auto what you are trying to do. Edit keeps the reference person/object steadier. Generate gives the LoRA more freedom for text-to-image or loose restyling.",
                 }),
                 "auto_convert": ("BOOLEAN", {
                     "default": True,
                     "label_on": "Auto-convert diffusers→native",
                     "label_off": "Direct load (native only)",
+                    "tooltip": "Leave ON for most downloaded FLUX LoRAs. Turn OFF only if you know the file is already native and want raw passthrough.",
                 }),
             },
             "optional": {
@@ -624,18 +626,18 @@ class FluxLoraLoader:
                     "default": False,
                     "label_on": "Auto (ΔW analysis)",
                     "label_off": "Manual (graph bars)",
-                    "tooltip": "When ON: auto-compute per-layer strengths from LoRA weight analysis. Bars auto-populate.",
+                    "tooltip": "Normalizes uneven LoRAs by reducing overly strong layers and lifting weaker ones. Good when the LoRA hits too hard in some regions.",
                 }),
                 "edit_mode": (PRESET_NAMES, {
                     "default": "None",
-                    "tooltip": "Semantic edit preset for Klein 9B. Controls which layers are dampened to preserve identity, style, etc.",
+                    "tooltip": "How protective the loader should be. Auto is the safest starting point. None means raw LoRA with no extra protection.",
                 }),
                 "balance": ("FLOAT", {
                     "default": 0.5,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
-                    "tooltip": "0.0 = full preset effect (max protection), 1.0 = standard LoRA (no protection).",
+                    "tooltip": "How strongly to apply the chosen mode. 0.0 = strongest protection/boost from the preset, 1.0 = raw LoRA behavior.",
                 }),
                 # Written by the JS graph widget — never shown as a text box
                 "layer_strengths": ("STRING", {"default": "{}"}),
@@ -772,39 +774,40 @@ class FluxLoraScheduled:
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "tooltip": "Base LoRA strength. The schedule multiplies this value.",
+                    "tooltip": "Base LoRA strength before the schedule curve is applied. Lower it if the scheduled effect still feels too strong overall.",
                 }),
                 "use_case": (USE_CASE_NAMES, {
                     "default": "Edit",
-                    "tooltip": "Edit = reference-preserving Auto behavior. Generate = freer text-to-image Auto behavior.",
+                    "tooltip": "Tells Auto what you are trying to do. Edit protects the input image more. Generate gives the LoRA more freedom.",
                 }),
                 "schedule": (SCHEDULE_NAMES, {
                     "default": "Fade Out",
-                    "tooltip": "Strength curve over sampling steps.",
+                    "tooltip": "When during sampling the LoRA should be strongest. Fade Out is usually the safest starting point for image editing.",
                 }),
             },
             "optional": {
                 "edit_mode": (PRESET_NAMES, {
                     "default": "Auto",
-                    "tooltip": "Semantic edit preset (per-layer control). Auto analyzes the LoRA automatically.",
+                    "tooltip": "How protective the loader should be across Klein layers. Auto analyzes the LoRA and picks a starting mode for you.",
                 }),
                 "balance": ("FLOAT", {
                     "default": 0.5,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
-                    "tooltip": "0.0 = full preset effect, 1.0 = standard LoRA.",
+                    "tooltip": "How strongly to apply the chosen mode. Lower = safer / more preserving. Higher = closer to raw LoRA.",
                 }),
                 "auto_convert": ("BOOLEAN", {
                     "default": True,
                     "label_on": "Auto-convert diffusers→native",
                     "label_off": "Direct load (native only)",
+                    "tooltip": "Leave ON for most downloaded FLUX LoRAs. Turn OFF only if you know the file is already native.",
                 }),
                 "keyframes": ("INT", {
                     "default": 5,
                     "min": 2,
                     "max": 10,
-                    "tooltip": "Number of keyframes for the schedule. More = smoother.",
+                    "tooltip": "How finely the schedule curve is sampled. More keyframes gives smoother transitions, but 5 is enough for most edits.",
                 }),
             },
         }
