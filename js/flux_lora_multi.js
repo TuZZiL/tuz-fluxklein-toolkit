@@ -11,14 +11,14 @@ const USE_CASES = ["Edit", "Generate"];
 
 const MIN_WIDTH = 520;
 const PAD = 10;
-const HEADER_H = 52;
-const TOOLBAR_H = 30;
-const HINT_H = 24;
-const CARD_SUMMARY_H = 74;
-const CARD_EXPANDED_H = 188;
-const EMPTY_H = 78;
-const ROW_GAP = 10;
-const CARD_GAP = 10;
+const HEADER_H = 48;
+const TOOLBAR_H = 28;
+const HINT_H = 20;
+const CARD_SUMMARY_H = 68;
+const CARD_EXPANDED_H = 176;
+const EMPTY_H = 70;
+const ROW_GAP = 8;
+const CARD_GAP = 8;
 const RADIUS = 8;
 
 const STRENGTH_RANGE = { min: -5.0, max: 5.0, step: 0.05, precision: 2 };
@@ -47,7 +47,7 @@ const THEME = {
 };
 
 const BADGES = {
-    "None": { label: "None", fill: "#1f273d", stroke: "#44506e", text: "#a9b6d3" },
+    "None": { label: "None", fill: "#181f33", stroke: "#36425c", text: "#7f8ba6" },
     "Preserve Face": { label: "Face", fill: "#251d45", stroke: "#6e58b7", text: "#d9ceff" },
     "Preserve Body": { label: "Body", fill: "#173329", stroke: "#4f9b76", text: "#bcefd2" },
     "Style Only": { label: "Style", fill: "#3a2911", stroke: "#a98837", text: "#ffe2a4" },
@@ -198,7 +198,9 @@ function drawBadge(ctx, rect, badge) {
     ctx.fillStyle = badge.text;
     ctx.font = "600 10px 'JetBrains Mono', monospace";
     ctx.textAlign = "center";
-    ctx.fillText(badge.label, rect.x + rect.w / 2, rect.y + rect.h * 0.68);
+    ctx.textBaseline = "middle";
+    ctx.fillText(badge.label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
+    ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
 }
 
@@ -215,20 +217,38 @@ function drawToggle(ctx, rect, enabled) {
     ctx.fill();
 }
 
-function drawShell(ctx, rect, label, value, active = false) {
+function drawSegmentButton(ctx, rect, label, active = false) {
     roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
     ctx.fillStyle = active ? THEME.surface3 : THEME.surface1;
     ctx.fill();
     ctx.strokeStyle = active ? THEME.borderStrong : THEME.border;
     ctx.lineWidth = 1;
     ctx.stroke();
+    ctx.fillStyle = active ? THEME.accentSoft : THEME.textSoft;
+    ctx.font = active ? "700 10px 'IBM Plex Sans', ui-sans-serif" : "600 10px 'IBM Plex Sans', ui-sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+}
+
+function drawMutedPill(ctx, rect, label, value) {
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
+    ctx.fillStyle = "#11182a";
+    ctx.fill();
+    ctx.strokeStyle = "#29344d";
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.fillStyle = THEME.textMuted;
     ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
-    ctx.fillText(label, rect.x + 10, rect.y + rect.h * 0.42);
-    ctx.fillStyle = active ? THEME.accentSoft : THEME.text;
-    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.fillText(label, rect.x + 10, rect.y + 8);
+    ctx.fillStyle = "#d6e0f3";
+    ctx.font = "600 10px 'JetBrains Mono', monospace";
     ctx.textAlign = "right";
-    ctx.fillText(value, rect.x + rect.w - 10, rect.y + rect.h * 0.68);
+    ctx.textBaseline = "middle";
+    ctx.fillText(value, rect.x + rect.w - 10, rect.y + rect.h / 2 + 3);
+    ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
 }
 
@@ -247,7 +267,25 @@ function drawActionPill(ctx, rect, label, tone = "neutral") {
     ctx.fillStyle = palette.text;
     ctx.font = "600 10px 'IBM Plex Sans', ui-sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h * 0.68);
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+}
+
+function drawIconButton(ctx, rect, glyph) {
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
+    ctx.fillStyle = THEME.surface2;
+    ctx.fill();
+    ctx.strokeStyle = THEME.border;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = THEME.textMuted;
+    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(glyph, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
+    ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left";
 }
 
@@ -567,22 +605,23 @@ app.registerExtension({
                 ctx.stroke();
 
                 ctx.fillStyle = THEME.text;
-                ctx.font = "700 13px 'IBM Plex Sans', ui-sans-serif";
-                ctx.fillText("FLUX LoRA Multi", x + 14, y + 18);
+                ctx.font = "700 12px 'IBM Plex Sans', ui-sans-serif";
+                ctx.fillText("FLUX LoRA Multi", x + 14, y + 17);
 
                 const active = activeSlotCount(node._slots);
                 const counterText = `Active: ${active} / ${node._slots.length}`;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "600 11px 'JetBrains Mono', monospace";
                 ctx.textAlign = "right";
-                ctx.fillText(counterText, x + w - 14, y + 18);
+                ctx.fillText(counterText, x + w - 14, y + 17);
                 ctx.textAlign = "left";
 
-                const chipY = y + 24;
-                const autoRect = { x: x + 14, y: chipY, w: 118, h: 20 };
-                const globalRect = { x: x + 142, y: chipY, w: 104, h: 20 };
-                const viewCompactRect = { x: x + w - 136, y: chipY, w: 58, h: 20 };
-                const viewExpandedRect = { x: x + w - 72, y: chipY, w: 58, h: 20 };
+                const chipY = y + 20;
+                const chipH = 20;
+                const autoRect = { x: x + 14, y: chipY, w: 116, h: chipH };
+                const globalRect = { x: x + 138, y: chipY, w: 96, h: chipH };
+                const viewCompactRect = { x: x + w - 142, y: chipY, w: 62, h: chipH };
+                const viewExpandedRect = { x: x + w - 74, y: chipY, w: 62, h: chipH };
 
                 node._multiState.bounds.header = {
                     autoConvert: autoRect,
@@ -597,12 +636,14 @@ app.registerExtension({
                 ctx.stroke();
                 ctx.fillStyle = THEME.textMuted;
                 ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
-                ctx.fillText("Auto-convert", autoRect.x + 10, autoRect.y + 8);
-                drawToggle(ctx, { x: autoRect.x + autoRect.w - 42, y: autoRect.y + 2, w: 30, h: 16 }, !!W("auto_convert")?.value);
+                ctx.textBaseline = "middle";
+                ctx.fillText("Auto-convert", autoRect.x + 10, autoRect.y + autoRect.h / 2 + 0.5);
+                ctx.textBaseline = "alphabetic";
+                drawToggle(ctx, { x: autoRect.x + autoRect.w - 42, y: autoRect.y + 3, w: 30, h: 16 }, !!W("auto_convert")?.value);
 
-                drawShell(ctx, globalRect, "Global x", "1.00", false);
-                drawShell(ctx, viewCompactRect, "View", "Compact", node._multiState.viewMode === "compact");
-                drawShell(ctx, viewExpandedRect, "View", "Expanded", node._multiState.viewMode === "expanded");
+                drawMutedPill(ctx, globalRect, "Global x", "1.00");
+                drawSegmentButton(ctx, viewCompactRect, "Compact", node._multiState.viewMode === "compact");
+                drawSegmentButton(ctx, viewExpandedRect, "Expanded", node._multiState.viewMode === "expanded");
             }
 
             function drawToolbar(ctx, x, y, w) {
@@ -614,16 +655,16 @@ app.registerExtension({
                 ctx.stroke();
 
                 const buttons = [
-                    { key: "add", label: "+ Add LoRA", tone: "neutral", w: 102 },
-                    { key: "enableAll", label: "Enable All", tone: "success", w: 86 },
-                    { key: "disableAll", label: "Disable All", tone: "neutral", w: 92 },
-                    { key: "reset", label: "Reset", tone: "danger", w: 62 },
+                    { key: "add", label: "+ Add LoRA", tone: "neutral", w: 98 },
+                    { key: "enableAll", label: "Enable All", tone: "success", w: 82 },
+                    { key: "disableAll", label: "Disable All", tone: "neutral", w: 88 },
+                    { key: "reset", label: "Reset", tone: "danger", w: 58 },
                 ];
 
                 let bx = x + 10;
                 node._multiState.bounds.toolbar = {};
                 for (const button of buttons) {
-                    const rect = { x: bx, y: y + 5, w: button.w, h: 20 };
+                    const rect = { x: bx, y: y + 4, w: button.w, h: 20 };
                     node._multiState.bounds.toolbar[button.key] = rect;
                     drawActionPill(ctx, rect, button.label, button.tone);
                     bx += button.w + 8;
@@ -638,38 +679,39 @@ app.registerExtension({
                 ctx.lineWidth = isDragging ? 1.5 : 1;
                 ctx.stroke();
 
-                const gripRect = { x: card.x + 10, y: card.y + 12, w: 16, h: 16 };
-                const toggleRect = { x: card.x + 32, y: card.y + 10, w: 34, h: 18 };
-                const chevronRect = { x: card.x + card.w - 52, y: card.y + 10, w: 16, h: 16 };
-                const menuRect = { x: card.x + card.w - 28, y: card.y + 10, w: 16, h: 16 };
+                const headerCenterY = card.y + 18;
+                const gripRect = { x: card.x + 10, y: headerCenterY - 8, w: 16, h: 16 };
+                const toggleRect = { x: card.x + 32, y: headerCenterY - 9, w: 34, h: 18 };
+                const chevronRect = { x: card.x + card.w - 56, y: headerCenterY - 9, w: 18, h: 18 };
+                const menuRect = { x: card.x + card.w - 32, y: headerCenterY - 9, w: 18, h: 18 };
 
                 drawGrip(ctx, gripRect);
                 drawToggle(ctx, toggleRect, slot.enabled);
 
                 ctx.fillStyle = THEME.text;
                 ctx.font = "600 12px 'IBM Plex Sans', ui-sans-serif";
-                ctx.fillText(fitText(ctx, shortLoraName(slot.lora), card.w - 180), card.x + 76, card.y + 23);
+                ctx.textBaseline = "middle";
+                ctx.fillText(fitText(ctx, shortLoraName(slot.lora), card.w - 190), card.x + 76, headerCenterY + 0.5);
+                ctx.textBaseline = "alphabetic";
 
-                const badgeRect = { x: card.x + card.w - 118, y: card.y + 9, w: 58, h: 18 };
+                const badgeRect = { x: card.x + card.w - 124, y: headerCenterY - 9, w: 60, h: 18 };
                 drawBadge(ctx, badgeRect, badge);
 
-                ctx.fillStyle = THEME.textMuted;
-                ctx.font = "600 12px 'JetBrains Mono', monospace";
-                ctx.fillText(">", chevronRect.x + 4, chevronRect.y + 12);
-                ctx.fillText("...", menuRect.x - 1, menuRect.y + 12);
+                drawIconButton(ctx, chevronRect, ">");
+                drawIconButton(ctx, menuRect, "...");
 
-                const barRect = { x: card.x + 16, y: card.y + 40, w: card.w * 0.42, h: 16 };
+                const barRect = { x: card.x + 16, y: card.y + 36, w: card.w * 0.42, h: 14 };
                 drawStrengthBar(ctx, barRect, slot.strength, false);
 
                 ctx.fillStyle = THEME.text;
-                ctx.font = "600 11px 'JetBrains Mono', monospace";
-                ctx.fillText(slot.strength.toFixed(2), barRect.x + barRect.w + 10, barRect.y + 12);
+                ctx.font = "600 10px 'JetBrains Mono', monospace";
+                ctx.fillText(slot.strength.toFixed(2), barRect.x + barRect.w + 10, barRect.y + 11);
 
-                const metaY = card.y + 60;
+                const metaY = card.y + 56;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
-                ctx.fillText(`Use case: ${slot.use_case}`, card.x + 16, metaY);
-                ctx.fillText(`Balance: ${slot.balance.toFixed(2)}`, card.x + 128, metaY);
+                ctx.fillText(slot.use_case, card.x + 16, metaY);
+                ctx.fillText(`Bal ${slot.balance.toFixed(2)}`, card.x + 74, metaY);
 
                 return {
                     card,
@@ -689,64 +731,64 @@ app.registerExtension({
                 ctx.lineWidth = isDragging ? 1.5 : 1;
                 ctx.stroke();
 
-                const headerY = card.y + 10;
-                const gripRect = { x: card.x + 10, y: headerY + 2, w: 16, h: 16 };
-                const toggleRect = { x: card.x + 32, y: headerY, w: 34, h: 18 };
-                const chevronRect = { x: card.x + card.w - 52, y: headerY, w: 16, h: 16 };
-                const menuRect = { x: card.x + card.w - 28, y: headerY, w: 16, h: 16 };
-                const badgeRect = { x: card.x + card.w - 118, y: headerY - 1, w: 58, h: 18 };
+                const headerCenterY = card.y + 18;
+                const gripRect = { x: card.x + 10, y: headerCenterY - 8, w: 16, h: 16 };
+                const toggleRect = { x: card.x + 32, y: headerCenterY - 9, w: 34, h: 18 };
+                const chevronRect = { x: card.x + card.w - 56, y: headerCenterY - 9, w: 18, h: 18 };
+                const menuRect = { x: card.x + card.w - 32, y: headerCenterY - 9, w: 18, h: 18 };
+                const badgeRect = { x: card.x + card.w - 124, y: headerCenterY - 9, w: 60, h: 18 };
 
                 drawGrip(ctx, gripRect);
                 drawToggle(ctx, toggleRect, slot.enabled);
                 ctx.fillStyle = THEME.text;
                 ctx.font = "600 12px 'IBM Plex Sans', ui-sans-serif";
-                ctx.fillText(fitText(ctx, shortLoraName(slot.lora), card.w - 190), card.x + 76, headerY + 13);
+                ctx.textBaseline = "middle";
+                ctx.fillText(fitText(ctx, shortLoraName(slot.lora), card.w - 200), card.x + 76, headerCenterY + 0.5);
+                ctx.textBaseline = "alphabetic";
                 drawBadge(ctx, badgeRect, badge);
 
-                ctx.fillStyle = THEME.textMuted;
-                ctx.font = "600 12px 'JetBrains Mono', monospace";
-                ctx.fillText(node._multiState.viewMode === "compact" ? "v" : "-", chevronRect.x + 4, chevronRect.y + 12);
-                ctx.fillText("...", menuRect.x - 1, menuRect.y + 12);
+                drawIconButton(ctx, chevronRect, node._multiState.viewMode === "compact" ? "v" : "-");
+                drawIconButton(ctx, menuRect, "...");
 
                 const innerX = card.x + 14;
                 const innerW = card.w - 28;
-                const fieldY1 = card.y + 38;
-                const loraRect = { x: innerX, y: fieldY1, w: innerW, h: 28 };
+                const fieldY1 = card.y + 34;
+                const loraRect = { x: innerX, y: fieldY1, w: innerW, h: 26 };
                 drawCardField(ctx, loraRect, "LoRA", fitText(ctx, slot.lora, innerW - 34));
 
                 const halfGap = 8;
                 const halfW = (innerW - halfGap) / 2;
-                const fieldY2 = card.y + 74;
-                const useCaseRect = { x: innerX, y: fieldY2, w: halfW, h: 28 };
-                const modeRect = { x: innerX + halfW + halfGap, y: fieldY2, w: halfW, h: 28 };
+                const fieldY2 = card.y + 66;
+                const useCaseRect = { x: innerX, y: fieldY2, w: halfW, h: 26 };
+                const modeRect = { x: innerX + halfW + halfGap, y: fieldY2, w: halfW, h: 26 };
                 drawCardField(ctx, useCaseRect, "Use case", slot.use_case);
                 drawCardField(ctx, modeRect, "Edit mode", badge.label);
 
-                const balanceLabelY = card.y + 114;
+                const balanceLabelY = card.y + 102;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
                 ctx.fillText("Balance", innerX, balanceLabelY);
                 ctx.textAlign = "right";
                 ctx.fillText(slot.balance.toFixed(2), innerX + innerW, balanceLabelY);
                 ctx.textAlign = "left";
-                const balanceRect = { x: innerX, y: balanceLabelY + 6, w: innerW, h: 16 };
+                const balanceRect = { x: innerX, y: balanceLabelY + 4, w: innerW, h: 14 };
                 drawBalanceBar(ctx, balanceRect, slot.balance, true);
 
-                const strengthLabelY = card.y + 144;
+                const strengthLabelY = card.y + 128;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
                 ctx.fillText("Strength", innerX, strengthLabelY);
                 ctx.textAlign = "right";
                 ctx.fillText(slot.strength.toFixed(2), innerX + innerW, strengthLabelY);
                 ctx.textAlign = "left";
-                const strengthRect = { x: innerX, y: strengthLabelY + 6, w: innerW, h: 16 };
+                const strengthRect = { x: innerX, y: strengthLabelY + 4, w: innerW, h: 14 };
                 drawStrengthBar(ctx, strengthRect, slot.strength, true);
 
-                const actionY = card.y + card.h - 28;
+                const actionY = card.y + card.h - 26;
                 const actionRects = {
-                    duplicate: { x: innerX, y: actionY, w: 76, h: 18 },
-                    toggle: { x: innerX + 84, y: actionY, w: 76, h: 18 },
-                    remove: { x: innerX + 168, y: actionY, w: 68, h: 18 },
+                    duplicate: { x: innerX, y: actionY, w: 72, h: 18 },
+                    toggle: { x: innerX + 80, y: actionY, w: 72, h: 18 },
+                    remove: { x: innerX + 160, y: actionY, w: 64, h: 18 },
                 };
                 drawActionPill(ctx, actionRects.duplicate, "Duplicate");
                 drawActionPill(ctx, actionRects.toggle, slot.enabled ? "Disable" : "Enable", slot.enabled ? "neutral" : "success");
