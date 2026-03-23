@@ -24,6 +24,11 @@ Values are multipliers relative to global_strength:
 N_DOUBLE = 8
 N_SINGLE = 24
 USE_CASE_NAMES = ["Edit", "Generate"]
+GRAPH_PRESET_MAP = {
+    "face": "Preserve Face",
+    "body": "Preserve Body",
+    "style": "Style Only",
+}
 
 EDIT_PRESETS = {
     "None": None,
@@ -134,6 +139,16 @@ EDIT_PRESETS = {
 }
 
 PRESET_NAMES = list(EDIT_PRESETS.keys()) + ["Auto"]
+
+
+def build_graph_presets():
+    """Return the graph button presets derived from the canonical edit presets."""
+    graph_presets = {}
+    for graph_key, preset_name in GRAPH_PRESET_MAP.items():
+        preset_cfg = EDIT_PRESETS.get(preset_name)
+        if preset_cfg:
+            graph_presets[graph_key] = preset_cfg
+    return graph_presets
 
 
 def interpolate_preset(preset_cfg, balance):

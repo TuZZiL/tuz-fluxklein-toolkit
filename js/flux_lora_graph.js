@@ -77,47 +77,15 @@ function defaultStrengths() {
     return { db, sb };
 }
 
-const GRAPH_PRESETS = {
-    face: {
-        db: {
-            0: { img: 1.0, txt: 0.90 }, 1: { img: 1.0, txt: 0.90 },
-            2: { img: 1.0, txt: 0.90 }, 3: { img: 1.0, txt: 0.90 },
-            4: { img: 1.0, txt: 0.85 }, 5: { img: 1.0, txt: 0.85 },
-            6: { img: 1.0, txt: 0.85 }, 7: { img: 1.0, txt: 0.85 },
-        },
-        sb: {
-            0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 1.0, 6: 0.95, 7: 0.95,
-            8: 0.90, 9: 0.85, 10: 0.80, 11: 0.75, 12: 0.65, 13: 0.60, 14: 0.55, 15: 0.50,
-            16: 0.45, 17: 0.40, 18: 0.38, 19: 0.35, 20: 0.33, 21: 0.32, 22: 0.30, 23: 0.30,
-        },
-    },
-    body: {
-        db: {
-            0: { img: 1.0, txt: 0.85 }, 1: { img: 1.0, txt: 0.85 },
-            2: { img: 1.0, txt: 0.85 }, 3: { img: 1.0, txt: 0.85 },
-            4: { img: 1.0, txt: 0.80 }, 5: { img: 1.0, txt: 0.80 },
-            6: { img: 1.0, txt: 0.80 }, 7: { img: 1.0, txt: 0.80 },
-        },
-        sb: {
-            0: 1.0, 1: 1.0, 2: 1.0, 3: 0.95, 4: 0.75, 5: 0.72, 6: 0.70, 7: 0.68,
-            8: 0.65, 9: 0.62, 10: 0.60, 11: 0.55, 12: 0.50, 13: 0.47, 14: 0.44, 15: 0.40,
-            16: 0.38, 17: 0.35, 18: 0.33, 19: 0.32, 20: 0.30, 21: 0.30, 22: 0.30, 23: 0.30,
-        },
-    },
-    style: {
-        db: {
-            0: { img: 0.40, txt: 1.0 }, 1: { img: 0.40, txt: 1.0 },
-            2: { img: 0.45, txt: 1.0 }, 3: { img: 0.45, txt: 1.0 },
-            4: { img: 0.50, txt: 1.0 }, 5: { img: 0.50, txt: 1.0 },
-            6: { img: 0.55, txt: 1.0 }, 7: { img: 0.55, txt: 1.0 },
-        },
-        sb: {
-            0: 1.0, 1: 1.0, 2: 1.0, 3: 0.95, 4: 0.90, 5: 0.85, 6: 0.80, 7: 0.75,
-            8: 0.70, 9: 0.65, 10: 0.60, 11: 0.55, 12: 0.50, 13: 0.45, 14: 0.40, 15: 0.38,
-            16: 0.35, 17: 0.33, 18: 0.30, 19: 0.30, 20: 0.30, 21: 0.30, 22: 0.30, 23: 0.30,
-        },
-    },
-};
+function parseGraphPresets(rawValue) {
+    if (!rawValue || typeof rawValue !== "string") return {};
+    try {
+        const parsed = JSON.parse(rawValue);
+        return typeof parsed === "object" && parsed ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
 
 app.registerExtension({
     name: "Comfy.FluxLoraGraph",
@@ -172,12 +140,14 @@ app.registerExtension({
 
             setTimeout(() => {
                 hideWidget(node, W("layer_strengths"));
+                hideWidget(node, W("graph_presets"));
                 node.setSize(node.computeSize());
                 node.setDirtyCanvas(true, true);
             }, 0);
 
             // ── State ─────────────────────────────────────────────────────────
             let strengths = defaultStrengths();
+            let graphPresets = parseGraphPresets(W("graph_presets")?.value);
             node._fluxCompatReport = null;
 
             // Last non-zero trackers for toggle
@@ -309,7 +279,7 @@ app.registerExtension({
                     return;
                 }
 
-                const mask = GRAPH_PRESETS[kind];
+                const mask = graphPresets[kind];
                 if (!mask) return;
                 for (let i = 0; i < N_DOUBLE; i++) {
                     const cfg = mask.db[i];

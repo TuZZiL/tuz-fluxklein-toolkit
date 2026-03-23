@@ -54,6 +54,7 @@ from .edit_presets import (
     EDIT_PRESETS,
     PRESET_NAMES,
     USE_CASE_NAMES,
+    build_graph_presets,
     interpolate_preset,
     resolve_preset_selection,
 )
@@ -639,6 +640,8 @@ class FluxLoraLoader:
                     "step": 0.05,
                     "tooltip": "How strongly to apply the chosen mode. 0.0 = strongest protection/boost from the preset, 1.0 = raw LoRA behavior.",
                 }),
+                # Canonical graph button masks from edit_presets.py — hidden by JS
+                "graph_presets": ("STRING", {"default": json.dumps(build_graph_presets(), sort_keys=True)}),
                 # Written by the JS graph widget — never shown as a text box
                 "layer_strengths": ("STRING", {"default": "{}"}),
             },
