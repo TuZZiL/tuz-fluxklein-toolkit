@@ -657,7 +657,7 @@ class FluxLoraLoader:
 
     def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
-                  edit_mode="None", balance=0.5, node_id=None):
+                  edit_mode="None", balance=0.5, graph_presets=None, node_id=None):
         if strength == 0:
             return (model,)
 
