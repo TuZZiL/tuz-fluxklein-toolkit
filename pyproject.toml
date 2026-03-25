@@ -22,10 +22,10 @@ license = {file = "LICENSE"}
 
 
 [project.urls]
-Repository = "https://github.com/capitan01R/Comfyui-flux2klein-Lora-loader"
+Repository = "https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader"
 #  Used by Comfy Registry https://registry.comfy.org
-Documentation = "https://github.com/capitan01R/Comfyui-flux2klein-Lora-loader/wiki"
-"Bug Tracker" = "https://github.com/capitan01R/Comfyui-flux2klein-Lora-loader/issues"
+Documentation = "https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader/wiki"
+"Bug Tracker" = "https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader/issues"
 
 [tool.comfy]
 PublisherId = "capitan01r"

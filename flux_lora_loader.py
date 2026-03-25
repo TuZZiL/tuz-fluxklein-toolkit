@@ -1,10 +1,11 @@
 """
-FLUX LoRA Loader — Consolidated node pack (3 nodes).
+FLUX LoRA Loader — Consolidated node pack (4 nodes).
 
 Nodes:
   FluxLoraLoader    — Single LoRA with interactive graph widget + auto-strength toggle
   FluxLoraMulti     — Dynamic multi-slot loader (rgthree-style "+ Add LoRA")
   FluxLoraScheduled — Per-step temporal scheduling, absorbs SetCondHooks
+  FluxLoraComposer  — Compact role-based multi-LoRA composer
 
 Architecture-aware LoRA loading for FLUX DiT (double_blocks / single_blocks).
 
@@ -60,6 +61,12 @@ from .edit_presets import (
 )
 from .lora_compat import normalize_lora_keys, build_compatibility_report
 from .schedules import SCHEDULE_NAMES, build_keyframes
+from .composer_policy import (
+    GOAL_NAMES,
+    SAFETY_NAMES,
+    compose_slot_policies,
+    summarize_policies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -531,8 +538,30 @@ def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance
     Shared pipeline: load → convert → apply edits → apply layer strengths → patch.
     Returns patched model clone.
     """
-    if strength == 0:
+    prepared = _prepare_patch_data(
+        model, lora_name, strength, auto_convert, edit_mode, balance, use_case,
+        layer_cfg=layer_cfg, auto_strength=auto_strength, node_label=node_label, node_id=node_id,
+    )
+    if prepared is None:
         return model
+
+    model_out = model.clone()
+    effective_strength = 1.0 if layer_cfg else strength
+    model_out.add_patches(
+        prepared["patch_dict"], strength_patch=effective_strength, strength_model=1.0
+    )
+    return model_out
+
+
+def _prepare_patch_data(model, lora_name, strength, auto_convert, edit_mode, balance,
+                        use_case="Edit", layer_cfg=None, auto_strength=False,
+                        node_label="FLUX LoRA", node_id=None):
+    """
+    Shared pipeline: load → convert → apply edits → apply layer strengths → build patches.
+    Returns a dict with patch_dict and compatibility diagnostics.
+    """
+    if strength == 0:
+        return None
 
     lora_path = folder_paths.get_full_path("loras", lora_name)
     lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
@@ -579,12 +608,14 @@ def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance
     patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
     _log_compatibility_report(node_label, compat_report, applied_modules=len(patch_dict))
     _send_compatibility_report(node_id, compat_report, applied_modules=len(patch_dict))
-    logger.info(f"[{node_label}] Applied {len(patch_dict)} patches")
-
-    model_out = model.clone()
-    effective_strength = 1.0 if layer_cfg else strength
-    model_out.add_patches(patch_dict, strength_patch=effective_strength, strength_model=1.0)
-    return model_out
+    logger.info(f"[{node_label}] Prepared {len(patch_dict)} patches")
+    return {
+        "patch_dict": patch_dict,
+        "compat_report": compat_report,
+        "lora_path": lora_path,
+        "strength": strength,
+        "layer_cfg": layer_cfg,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -748,7 +779,120 @@ class FluxLoraMulti:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# NODE 3 — FluxLoraScheduled  (temporal scheduling, absorbs SetCondHooks)
+# NODE 3 — FluxLoraComposer  (compact role-based composition)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class FluxLoraComposer:
+    """
+    Compact role-based multi-LoRA composer.
+    Users pick LoRAs, strengths, and semantic roles; the node handles the
+    layer policy, edit-mode, and normalization internally.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "goal": (GOAL_NAMES, {
+                    "default": "Edit",
+                    "tooltip": "Edit protects structure most, Restyle opens up style changes, Generate allows the freest LoRA composition.",
+                }),
+                "safety": (SAFETY_NAMES, {
+                    "default": "Balanced",
+                    "tooltip": "Safe reduces multi-LoRA conflicts more aggressively, Strong allows a hotter mix.",
+                }),
+            },
+            "optional": {
+                "auto_normalize": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "Auto-normalize overlap",
+                    "label_off": "Raw slot stacking",
+                    "tooltip": "Keeps overlapping LoRAs from overloading the same FLUX block groups.",
+                }),
+                "auto_convert": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "Auto-convert diffusers→native",
+                    "label_off": "Direct load (native only)",
+                    "tooltip": "Leave ON for most downloaded FLUX LoRAs.",
+                }),
+                "slot_data": ("STRING", {
+                    "default": "[]",
+                    "multiline": False,
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "compose_loras"
+    CATEGORY = "loaders/FLUX"
+    TITLE = "FLUX LoRA Composer"
+
+    def compose_loras(self, model, goal="Edit", safety="Balanced",
+                      auto_normalize=True, auto_convert=True, slot_data="[]"):
+        try:
+            slots = json.loads(slot_data)
+        except Exception:
+            logger.warning("[FLUX LoRA Composer] Invalid slot_data JSON, skipping")
+            return (model,)
+
+        if not isinstance(slots, list):
+            return (model,)
+
+        policies = compose_slot_policies(
+            slots, goal=goal, safety=safety, auto_normalize=auto_normalize
+        )
+        summary = summarize_policies(policies)
+        logger.info(
+            f"[FLUX LoRA Composer] goal={goal} safety={safety}"
+            f" | active={summary['active_count']} | main={summary['main_lora']}"
+            f" | support={summary['support_count']} | normalized={summary['normalized']}"
+        )
+
+        current = model
+        for entry in policies:
+            slot = entry["slot"]
+            if not slot["enabled"] or slot["lora"] == "None" or slot["strength"] == 0:
+                continue
+
+            if entry["normalized"]:
+                logger.info(
+                    f"[FLUX LoRA Composer] Normalized overlap for '{slot['lora']}'"
+                    f" role={slot['role']} groups={','.join(sorted(set(entry['conflicts'])))}"
+                )
+            else:
+                logger.info(
+                    f"[FLUX LoRA Composer] Applying '{slot['lora']}'"
+                    f" role={slot['role']} edit_mode={entry['edit_mode']}"
+                )
+
+            prepared = _prepare_patch_data(
+                current,
+                slot["lora"],
+                slot["strength"],
+                auto_convert,
+                entry["edit_mode"],
+                entry["balance"],
+                use_case="Edit" if goal == "Edit" else "Generate",
+                layer_cfg=entry["layer_cfg"],
+                auto_strength=False,
+                node_label=f"FLUX LoRA Composer slot {entry['index'] + 1}",
+            )
+            if prepared is None:
+                continue
+
+            current = current.clone()
+            current.add_patches(
+                prepared["patch_dict"],
+                strength_patch=1.0,
+                strength_model=1.0,
+            )
+
+        return (current,)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NODE 4 — FluxLoraScheduled  (temporal scheduling, absorbs SetCondHooks)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FluxLoraScheduled:
@@ -879,11 +1023,13 @@ class FluxLoraScheduled:
 NODE_CLASS_MAPPINGS = {
     "FluxLoraLoader":    FluxLoraLoader,
     "FluxLoraMulti":     FluxLoraMulti,
+    "FluxLoraComposer":  FluxLoraComposer,
     "FluxLoraScheduled": FluxLoraScheduled,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxLoraLoader":    "FLUX LoRA Loader",
     "FluxLoraMulti":     "FLUX LoRA Multi",
+    "FluxLoraComposer":  "FLUX LoRA Composer",
     "FluxLoraScheduled": "FLUX LoRA Scheduled",
 }

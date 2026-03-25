@@ -30,7 +30,7 @@ const STR_MAX   = 2.0;
 const STR_MIN   = 0.0;
 
 const PAD       = 10;
-const GRAPH_H   = 170;
+const GRAPH_H   = 164;
 const BTN_ROW_H = 26;
 const LABEL_H   = 18;
 const BADGE_H   = 18;
@@ -40,6 +40,25 @@ const MIN_NODE_W = 430;
 // Fraction of graph width for each section
 const DB_FRAC = N_DOUBLE / (N_DOUBLE + N_SINGLE);  // 8/32 = 0.25
 const SB_FRAC = N_SINGLE / (N_DOUBLE + N_SINGLE);  // 24/32 = 0.75
+
+const THEME = {
+    panel: "#181818",
+    panelBorder: "#2f2f2f",
+    surface: "#111111",
+    surfaceRaised: "#1e1e1e",
+    surfaceMuted: "#242424",
+    line: "#363636",
+    lineSoft: "rgba(255,255,255,0.09)",
+    text: "#d5d5d5",
+    textMuted: "#9a9a9a",
+    accent: "#b9b9b9",
+    img: "#7f8790",
+    txt: "#6f7d88",
+    single: "#8a8a8a",
+    active: "#f2f2f2",
+    tooltipBg: "#101010",
+    tooltipBorder: "#303030",
+};
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -357,10 +376,10 @@ app.registerExtension({
                         const btnX = PAD + idx * (btnW + btnGap);
                         _btnBounds[btn.key] = { ...btn, w: btnW, h: bH, y: bY };
                         _btnBounds[btn.key].x = btnX;
-                        roundRect(ctx, btnX, bY, btnW, bH, 3);
-                        ctx.fillStyle   = "#1a1a2e"; ctx.fill();
-                        ctx.strokeStyle = "#3a3a5a"; ctx.lineWidth = 1; ctx.stroke();
-                        ctx.fillStyle   = "#6655aa"; ctx.font = "bold 9px monospace";
+                        roundRect(ctx, btnX, bY, btnW, bH, 4);
+                        ctx.fillStyle   = THEME.surfaceRaised; ctx.fill();
+                        ctx.strokeStyle = THEME.panelBorder; ctx.lineWidth = 1; ctx.stroke();
+                        ctx.fillStyle   = THEME.text; ctx.font = "600 9px sans-serif";
                         ctx.textAlign   = "center";
                         ctx.fillText(btn.label, btnX + btnW / 2, bY + bH * 0.68);
                     });
@@ -374,8 +393,8 @@ app.registerExtension({
                     _graphBounds = { x: gX, y: gY, w: gW, h: gH };
 
                     // Background
-                    ctx.fillStyle   = "#0a0a18";
-                    ctx.strokeStyle = "#2e2e4a"; ctx.lineWidth = 1;
+                    ctx.fillStyle   = THEME.surface;
+                    ctx.strokeStyle = THEME.panelBorder; ctx.lineWidth = 1;
                     roundRect(ctx, gX, gY, gW, gH, 5); ctx.fill(); ctx.stroke();
 
                     // Section widths
@@ -386,7 +405,7 @@ app.registerExtension({
                     _dividerX    = gX + dbW;
 
                     // Section divider
-                    ctx.strokeStyle = "#3a3a6a"; ctx.lineWidth = 1;
+                    ctx.strokeStyle = THEME.line; ctx.lineWidth = 1;
                     ctx.setLineDash([3, 3]);
                     ctx.beginPath();
                     ctx.moveTo(_dividerX, gY + 2);
@@ -403,7 +422,7 @@ app.registerExtension({
                     const sbRefY     = gY + gH * (1 - refNorm);
 
                     [dbRefY_img, dbRefY_txt].forEach(ry => {
-                        ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 1;
+                        ctx.strokeStyle = THEME.lineSoft; ctx.lineWidth = 1;
                         ctx.setLineDash([4, 4]);
                         ctx.beginPath();
                         ctx.moveTo(gX + 1, ry);
@@ -411,7 +430,7 @@ app.registerExtension({
                         ctx.stroke();
                         ctx.setLineDash([]);
                     });
-                    ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 1;
+                    ctx.strokeStyle = THEME.lineSoft; ctx.lineWidth = 1;
                     ctx.setLineDash([4, 4]);
                     ctx.beginPath();
                     ctx.moveTo(_dividerX + 1, sbRefY);
@@ -420,7 +439,7 @@ app.registerExtension({
                     ctx.setLineDash([]);
 
                     // img/txt midline in double blocks section
-                    ctx.strokeStyle = "#1c1c30"; ctx.lineWidth = 0.5;
+                    ctx.strokeStyle = THEME.line; ctx.lineWidth = 0.5;
                     ctx.setLineDash([3, 4]);
                     ctx.beginPath();
                     ctx.moveTo(gX + 1, gY + gH / 2);
@@ -442,16 +461,13 @@ app.registerExtension({
                         const imgBarY = gY + (gH / 2 - 3) - imgH;
 
                         if (img > 0.001) {
-                            const ig = ctx.createLinearGradient(0, imgBarY, 0, imgBarY + imgH);
-                            ig.addColorStop(0, (isDragDB && drag.comp === "img") ? "#d0b8ff" : "#9b7fff");
-                            ig.addColorStop(1, "#2a0a5a");
-                            ctx.fillStyle = ig;
+                            ctx.fillStyle = (isDragDB && drag.comp === "img") ? THEME.active : THEME.img;
                         } else {
-                            ctx.fillStyle = "#1a1a2e";
+                            ctx.fillStyle = THEME.surfaceMuted;
                         }
                         ctx.fillRect(innerX, imgBarY, barInW, imgH);
                         if (img > 0.001) {
-                            ctx.fillStyle = (isDragDB && drag.comp === "img") ? "#ffffff" : "#c8b8ff";
+                            ctx.fillStyle = (isDragDB && drag.comp === "img") ? THEME.active : THEME.accent;
                             ctx.fillRect(innerX, imgBarY, barInW, 2);
                         }
 
@@ -461,16 +477,13 @@ app.registerExtension({
                         const txtBarY = gY + gH / 2 + 3;
 
                         if (txt > 0.001) {
-                            const tg = ctx.createLinearGradient(0, txtBarY, 0, txtBarY + txtH);
-                            tg.addColorStop(0, (isDragDB && drag.comp === "txt") ? "#a0f0ff" : "#50c8f0");
-                            tg.addColorStop(1, "#0a2a30");
-                            ctx.fillStyle = tg;
+                            ctx.fillStyle = (isDragDB && drag.comp === "txt") ? THEME.active : THEME.txt;
                         } else {
-                            ctx.fillStyle = "#1a1a2e";
+                            ctx.fillStyle = THEME.surfaceMuted;
                         }
                         ctx.fillRect(innerX, txtBarY, barInW, txtH);
                         if (txt > 0.001) {
-                            ctx.fillStyle = (isDragDB && drag.comp === "txt") ? "#ffffff" : "#a0e8ff";
+                            ctx.fillStyle = (isDragDB && drag.comp === "txt") ? THEME.active : THEME.accent;
                             ctx.fillRect(innerX, txtBarY, barInW, 2);
                         }
 
@@ -481,7 +494,7 @@ app.registerExtension({
                         }
 
                         // Index label
-                        ctx.fillStyle = "#3a3a5a"; ctx.font = "7px monospace";
+                        ctx.fillStyle = THEME.textMuted; ctx.font = "7px monospace";
                         ctx.textAlign = "center";
                         ctx.fillText(String(i), barX + _dbColW / 2, gY + gH - 3);
                         ctx.textAlign = "left";
@@ -500,16 +513,13 @@ app.registerExtension({
                         const barY  = gY + (gH - 4) - barH;
 
                         if (val > 0.001) {
-                            const sg = ctx.createLinearGradient(0, barY, 0, barY + barH);
-                            sg.addColorStop(0, isSB ? "#c0ffd8" : "#5ee89a");
-                            sg.addColorStop(1, "#0a2a18");
-                            ctx.fillStyle = sg;
+                            ctx.fillStyle = isSB ? THEME.active : THEME.single;
                         } else {
-                            ctx.fillStyle = "#1a1a2e";
+                            ctx.fillStyle = THEME.surfaceMuted;
                         }
                         ctx.fillRect(innerX, barY, barInW, barH);
                         if (val > 0.001) {
-                            ctx.fillStyle = isSB ? "#ffffff" : "#a0ffcc";
+                            ctx.fillStyle = isSB ? THEME.active : THEME.accent;
                             ctx.fillRect(innerX, barY, barInW, 2);
                         }
 
@@ -520,7 +530,7 @@ app.registerExtension({
 
                         // Index label (every 4)
                         if (i % 4 === 0) {
-                            ctx.fillStyle = "#3a3a5a"; ctx.font = "7px monospace";
+                            ctx.fillStyle = THEME.textMuted; ctx.font = "7px monospace";
                             ctx.textAlign = "center";
                             ctx.fillText(String(i), barX + _sbColW / 2, gY + gH - 3);
                             ctx.textAlign = "left";
@@ -528,14 +538,14 @@ app.registerExtension({
                     }
 
                     // Section labels
-                    ctx.fillStyle = "#4a3a7a"; ctx.font = "bold 8px monospace";
+                    ctx.fillStyle = THEME.text; ctx.font = "600 8px sans-serif";
                     ctx.fillText("DOUBLE", gX + 3, gY + 11);
-                    ctx.fillStyle = "#2a6a4a"; ctx.font = "bold 8px monospace";
+                    ctx.fillStyle = THEME.text; ctx.font = "600 8px sans-serif";
                     ctx.fillText("SINGLE", _dividerX + 3, gY + 11);
 
-                    ctx.fillStyle = "#5533aa"; ctx.font = "bold 7px monospace";
+                    ctx.fillStyle = THEME.img; ctx.font = "600 7px sans-serif";
                     ctx.fillText("IMG", gX + 3, gY + gH / 2 - 4);
-                    ctx.fillStyle = "#2a7a9a";
+                    ctx.fillStyle = THEME.txt;
                     ctx.fillText("TXT", gX + 3, gY + gH / 2 + 10);
 
                     // Drag tooltip
@@ -545,11 +555,13 @@ app.registerExtension({
                             ? gX + (drag.idx + 0.5) * _dbColW
                             : _dividerX + (drag.idx + 0.5) * _sbColW;
                         const tx = clamp(tipX, gX + 22, gX + gW - 22);
-                        ctx.fillStyle = "#0d0d1a";
+                        ctx.fillStyle = THEME.tooltipBg;
                         roundRect(ctx, tx - 22, gY + gH / 2 - 9, 44, 14, 3);
                         ctx.fill();
-                        ctx.fillStyle = drag.type === "sb" ? "#a0ffcc" :
-                                        drag.comp === "img" ? "#c8b8ff" : "#a0e8ff";
+                        ctx.strokeStyle = THEME.tooltipBorder;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        ctx.fillStyle = THEME.active;
                         ctx.font = "bold 9px monospace"; ctx.textAlign = "center";
                         ctx.fillText(val.toFixed(2), tx, gY + gH / 2);
                         ctx.textAlign = "left";
@@ -557,21 +569,21 @@ app.registerExtension({
 
                     // ── Label row ──────────────────────────────────────────────
                     const lY = gY + gH + 6;
-                    ctx.fillStyle = "#4a4a6a"; ctx.font = "8px monospace";
+                    ctx.fillStyle = THEME.textMuted; ctx.font = "8px monospace";
                     ctx.fillText(`global: ${gs.toFixed(2)}`, gX + 2, lY + 11);
 
                     const legendY = lY + 11;
                     let legendX = gX + 64;
 
-                    ctx.fillStyle = "#5533aa";
+                    ctx.fillStyle = THEME.img;
                     ctx.fillText("■ image", legendX, legendY);
                     legendX += ctx.measureText("■ image").width + 10;
 
-                    ctx.fillStyle = "#2a7a9a";
+                    ctx.fillStyle = THEME.txt;
                     ctx.fillText("■ text", legendX, legendY);
                     legendX += ctx.measureText("■ text").width + 10;
 
-                    ctx.fillStyle = "#2a6a4a";
+                    ctx.fillStyle = THEME.single;
                     ctx.fillText("■ single", legendX, legendY);
                     legendX += ctx.measureText("■ single").width + 16;
 
@@ -582,7 +594,7 @@ app.registerExtension({
                             : "drag • click • shift";
                     const helpWidth = ctx.measureText(helpText).width;
                     const helpX = gX + gW - helpWidth - 4;
-                    ctx.fillStyle = "#3a3a5a";
+                    ctx.fillStyle = THEME.textMuted;
                     if (helpX > legendX) {
                         ctx.fillText(helpText, helpX, legendY);
                     }

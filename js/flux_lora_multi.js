@@ -25,35 +25,35 @@ const STRENGTH_RANGE = { min: -5.0, max: 5.0, step: 0.05, precision: 2 };
 const BALANCE_RANGE = { min: 0.0, max: 1.0, step: 0.05, precision: 2 };
 
 const THEME = {
-    canvas: "#080c18",
-    surface0: "#0f1424",
-    surface1: "#141c31",
-    surface2: "#1b2640",
-    surface3: "#223154",
-    border: "#334364",
-    borderStrong: "#48618d",
-    text: "#edf3ff",
-    textSoft: "#a9b6d3",
-    textMuted: "#71829f",
-    accent: "#86b7ff",
-    accentSoft: "#d5e6ff",
-    success: "#79e3ab",
-    successBg: "#133126",
-    warning: "#f2d084",
-    warningBg: "#342810",
-    danger: "#ff8b9f",
-    dangerBg: "#351721",
-    shadow: "rgba(0,0,0,0.28)",
+    canvas: "#151515",
+    surface0: "#1a1a1a",
+    surface1: "#202020",
+    surface2: "#262626",
+    surface3: "#2c2c2c",
+    border: "#343434",
+    borderStrong: "#4a4a4a",
+    text: "#dedede",
+    textSoft: "#b7b7b7",
+    textMuted: "#919191",
+    accent: "#d0d0d0",
+    accentSoft: "#f2f2f2",
+    success: "#dddddd",
+    successBg: "#252525",
+    warning: "#d4d4d4",
+    warningBg: "#252525",
+    danger: "#efefef",
+    dangerBg: "#252525",
+    shadow: "rgba(0,0,0,0.14)",
 };
 
 const BADGES = {
-    "None": { label: "None", fill: "#181f33", stroke: "#36425c", text: "#7f8ba6" },
-    "Preserve Face": { label: "Face", fill: "#251d45", stroke: "#6e58b7", text: "#d9ceff" },
-    "Preserve Body": { label: "Body", fill: "#173329", stroke: "#4f9b76", text: "#bcefd2" },
-    "Style Only": { label: "Style", fill: "#3a2911", stroke: "#a98837", text: "#ffe2a4" },
-    "Edit Subject": { label: "Edit", fill: "#1c3150", stroke: "#5686c4", text: "#d0e5ff" },
-    "Boost Prompt": { label: "Prompt", fill: "#3a1f2d", stroke: "#af5d88", text: "#ffd2e8" },
-    "Auto": { label: "Auto", fill: "#143145", stroke: "#4d8fbb", text: "#bdeaff" },
+    "None": { label: "NONE", fill: "#232323", stroke: "#3a3a3a", text: "#9d9d9d" },
+    "Preserve Face": { label: "FACE", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
+    "Preserve Body": { label: "BODY", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
+    "Style Only": { label: "STYLE", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
+    "Edit Subject": { label: "EDIT", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
+    "Boost Prompt": { label: "PROMPT", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
+    "Auto": { label: "AUTO", fill: "#2a2a2a", stroke: "#5a5a5a", text: "#f0f0f0" },
 };
 
 let _loraListCache = null;
@@ -196,7 +196,7 @@ function drawBadge(ctx, rect, badge) {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = badge.text;
-    ctx.font = "600 10px 'JetBrains Mono', monospace";
+    ctx.font = "600 10px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(badge.label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
@@ -206,14 +206,14 @@ function drawBadge(ctx, rect, badge) {
 
 function drawToggle(ctx, rect, enabled) {
     roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
-    ctx.fillStyle = enabled ? THEME.successBg : THEME.surface2;
+    ctx.fillStyle = enabled ? THEME.surface3 : THEME.surface2;
     ctx.fill();
-    ctx.strokeStyle = enabled ? "#4f9b76" : THEME.border;
+    ctx.strokeStyle = enabled ? THEME.borderStrong : THEME.border;
     ctx.lineWidth = 1;
     ctx.stroke();
     const dotX = enabled ? rect.x + rect.w - rect.h + 4 : rect.x + 4;
     roundRect(ctx, dotX, rect.y + 4, rect.h - 8, rect.h - 8, 5);
-    ctx.fillStyle = enabled ? THEME.success : THEME.textMuted;
+    ctx.fillStyle = enabled ? THEME.text : THEME.textMuted;
     ctx.fill();
 }
 
@@ -225,7 +225,7 @@ function drawSegmentButton(ctx, rect, label, active = false) {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = active ? THEME.accentSoft : THEME.textSoft;
-    ctx.font = active ? "700 10px 'IBM Plex Sans', ui-sans-serif" : "600 10px 'IBM Plex Sans', ui-sans-serif";
+    ctx.font = active ? "700 10px sans-serif" : "600 10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
@@ -235,16 +235,16 @@ function drawSegmentButton(ctx, rect, label, active = false) {
 
 function drawMutedPill(ctx, rect, label, value) {
     roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
-    ctx.fillStyle = "#11182a";
+    ctx.fillStyle = THEME.surface1;
     ctx.fill();
-    ctx.strokeStyle = "#29344d";
+    ctx.strokeStyle = THEME.border;
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = THEME.textMuted;
-    ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+    ctx.font = "500 10px sans-serif";
     ctx.fillText(label, rect.x + 10, rect.y + 8);
-    ctx.fillStyle = "#d6e0f3";
-    ctx.font = "600 10px 'JetBrains Mono', monospace";
+    ctx.fillStyle = THEME.text;
+    ctx.font = "600 10px monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     ctx.fillText(value, rect.x + rect.w - 10, rect.y + rect.h / 2 + 3);
@@ -254,9 +254,9 @@ function drawMutedPill(ctx, rect, label, value) {
 
 function drawActionPill(ctx, rect, label, tone = "neutral") {
     const palette = tone === "danger"
-        ? { fill: THEME.dangerBg, stroke: "#7d334b", text: THEME.danger }
+        ? { fill: THEME.dangerBg, stroke: THEME.borderStrong, text: THEME.text }
         : tone === "success"
-            ? { fill: THEME.successBg, stroke: "#47785f", text: THEME.success }
+            ? { fill: THEME.surface3, stroke: THEME.borderStrong, text: THEME.text }
             : { fill: THEME.surface2, stroke: THEME.border, text: THEME.textSoft };
     roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
     ctx.fillStyle = palette.fill;
@@ -265,7 +265,7 @@ function drawActionPill(ctx, rect, label, tone = "neutral") {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = palette.text;
-    ctx.font = "600 10px 'IBM Plex Sans', ui-sans-serif";
+    ctx.font = "600 10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
@@ -281,7 +281,7 @@ function drawIconButton(ctx, rect, glyph) {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = THEME.textMuted;
-    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.font = "600 11px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(glyph, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
@@ -298,7 +298,7 @@ function drawStrengthBar(ctx, rect, value, interactive = false) {
     const ratio = strengthRatio(value);
     const valueX = rect.x + rect.w * ratio;
     roundRect(ctx, rect.x, rect.y, rect.w, rect.h, rect.h / 2);
-    ctx.fillStyle = interactive ? "#0e1730" : THEME.surface2;
+    ctx.fillStyle = interactive ? THEME.surface1 : THEME.surface2;
     ctx.fill();
     ctx.strokeStyle = THEME.border;
     ctx.lineWidth = 1;
@@ -314,7 +314,7 @@ function drawStrengthBar(ctx, rect, value, interactive = false) {
         const fillW = Math.max(0, valueX - centerX);
         if (fillW > 0) {
             roundRect(ctx, centerX, rect.y + 2, fillW, rect.h - 4, Math.max(3, (rect.h - 4) / 2));
-            ctx.fillStyle = "#8ec2ff";
+            ctx.fillStyle = "#c4c4c4";
             ctx.fill();
         }
     } else {
@@ -322,7 +322,7 @@ function drawStrengthBar(ctx, rect, value, interactive = false) {
         const fillW = Math.max(0, centerX - valueX);
         if (fillW > 0) {
             roundRect(ctx, fillX, rect.y + 2, fillW, rect.h - 4, Math.max(3, (rect.h - 4) / 2));
-            ctx.fillStyle = "#ff9cb0";
+            ctx.fillStyle = "#9e9e9e";
             ctx.fill();
         }
     }
@@ -331,14 +331,14 @@ function drawStrengthBar(ctx, rect, value, interactive = false) {
 function drawBalanceBar(ctx, rect, value, interactive = false) {
     const ratio = clamp(value, 0, 1);
     roundRect(ctx, rect.x, rect.y, rect.w, rect.h, rect.h / 2);
-    ctx.fillStyle = interactive ? "#0e1730" : THEME.surface2;
+    ctx.fillStyle = interactive ? THEME.surface1 : THEME.surface2;
     ctx.fill();
     ctx.strokeStyle = THEME.border;
     ctx.lineWidth = 1;
     ctx.stroke();
     if (ratio > 0) {
         roundRect(ctx, rect.x + 2, rect.y + 2, Math.max(0, (rect.w - 4) * ratio), rect.h - 4, Math.max(3, (rect.h - 4) / 2));
-        ctx.fillStyle = "#8ce0d7";
+        ctx.fillStyle = "#b9b9b9";
         ctx.fill();
     }
 }
@@ -364,10 +364,10 @@ function drawCardField(ctx, rect, label, value) {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = THEME.textMuted;
-    ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+    ctx.font = "500 10px sans-serif";
     ctx.fillText(label, rect.x + 10, rect.y + rect.h * 0.42);
     ctx.fillStyle = THEME.text;
-    ctx.font = "600 11px 'JetBrains Mono', monospace";
+    ctx.font = "600 11px monospace";
     ctx.fillText(value, rect.x + 10, rect.y + rect.h * 0.73);
     ctx.fillStyle = THEME.textMuted;
     ctx.textAlign = "right";
@@ -605,13 +605,13 @@ app.registerExtension({
                 ctx.stroke();
 
                 ctx.fillStyle = THEME.text;
-                ctx.font = "700 12px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "700 12px sans-serif";
                 ctx.fillText("FLUX LoRA Multi", x + 14, y + 17);
 
                 const active = activeSlotCount(node._slots);
                 const counterText = `Active: ${active} / ${node._slots.length}`;
                 ctx.fillStyle = THEME.textSoft;
-                ctx.font = "600 11px 'JetBrains Mono', monospace";
+                ctx.font = "600 11px monospace";
                 ctx.textAlign = "right";
                 ctx.fillText(counterText, x + w - 14, y + 17);
                 ctx.textAlign = "left";
@@ -635,13 +635,13 @@ app.registerExtension({
                 ctx.strokeStyle = THEME.border;
                 ctx.stroke();
                 ctx.fillStyle = THEME.textMuted;
-                ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "500 10px sans-serif";
                 ctx.textBaseline = "middle";
                 ctx.fillText("Auto-convert", autoRect.x + 10, autoRect.y + autoRect.h / 2 + 0.5);
                 ctx.textBaseline = "alphabetic";
                 drawToggle(ctx, { x: autoRect.x + autoRect.w - 42, y: autoRect.y + 3, w: 30, h: 16 }, !!W("auto_convert")?.value);
 
-                drawMutedPill(ctx, globalRect, "Global x", "1.00");
+                drawMutedPill(ctx, globalRect, "Slots", `${active}`);
                 drawSegmentButton(ctx, viewCompactRect, "Compact", node._multiState.viewMode === "compact");
                 drawSegmentButton(ctx, viewExpandedRect, "Expanded", node._multiState.viewMode === "expanded");
             }
@@ -689,7 +689,7 @@ app.registerExtension({
                 drawToggle(ctx, toggleRect, slot.enabled);
 
                 ctx.fillStyle = THEME.text;
-                ctx.font = "600 12px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "600 12px sans-serif";
                 ctx.textBaseline = "middle";
                 ctx.fillText(fitText(ctx, shortLoraName(slot.lora), card.w - 190), card.x + 76, headerCenterY + 0.5);
                 ctx.textBaseline = "alphabetic";
@@ -704,12 +704,12 @@ app.registerExtension({
                 drawStrengthBar(ctx, barRect, slot.strength, false);
 
                 ctx.fillStyle = THEME.text;
-                ctx.font = "600 10px 'JetBrains Mono', monospace";
+                ctx.font = "600 10px monospace";
                 ctx.fillText(slot.strength.toFixed(2), barRect.x + barRect.w + 10, barRect.y + 11);
 
                 const metaY = card.y + 56;
                 ctx.fillStyle = THEME.textSoft;
-                ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "500 10px sans-serif";
                 ctx.fillText(slot.use_case, card.x + 16, metaY);
                 ctx.fillText(`Bal ${slot.balance.toFixed(2)}`, card.x + 74, metaY);
 
@@ -741,7 +741,7 @@ app.registerExtension({
                 drawGrip(ctx, gripRect);
                 drawToggle(ctx, toggleRect, slot.enabled);
                 ctx.fillStyle = THEME.text;
-                ctx.font = "600 12px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "600 12px sans-serif";
                 ctx.textBaseline = "middle";
                 ctx.fillText(fitText(ctx, shortLoraName(slot.lora), card.w - 200), card.x + 76, headerCenterY + 0.5);
                 ctx.textBaseline = "alphabetic";
@@ -766,7 +766,7 @@ app.registerExtension({
 
                 const balanceLabelY = card.y + 102;
                 ctx.fillStyle = THEME.textSoft;
-                ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "500 10px sans-serif";
                 ctx.fillText("Balance", innerX, balanceLabelY);
                 ctx.textAlign = "right";
                 ctx.fillText(slot.balance.toFixed(2), innerX + innerW, balanceLabelY);
@@ -776,7 +776,7 @@ app.registerExtension({
 
                 const strengthLabelY = card.y + 128;
                 ctx.fillStyle = THEME.textSoft;
-                ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "500 10px sans-serif";
                 ctx.fillText("Strength", innerX, strengthLabelY);
                 ctx.textAlign = "right";
                 ctx.fillText(slot.strength.toFixed(2), innerX + innerW, strengthLabelY);
@@ -822,10 +822,10 @@ app.registerExtension({
                     ctx.lineWidth = 1;
                     ctx.stroke();
                     ctx.fillStyle = THEME.text;
-                    ctx.font = "600 12px 'IBM Plex Sans', ui-sans-serif";
+                    ctx.font = "600 12px sans-serif";
                     ctx.fillText("No LoRA slots yet", emptyRect.x + 16, emptyRect.y + 28);
                     ctx.fillStyle = THEME.textMuted;
-                    ctx.font = "500 11px 'IBM Plex Sans', ui-sans-serif";
+                    ctx.font = "500 11px sans-serif";
                     ctx.fillText("Use + Add LoRA to create the first slot.", emptyRect.x + 16, emptyRect.y + 48);
                     return EMPTY_H;
                 }
@@ -857,7 +857,7 @@ app.registerExtension({
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 ctx.fillStyle = THEME.textMuted;
-                ctx.font = "500 10px 'IBM Plex Sans', ui-sans-serif";
+                ctx.font = "500 10px sans-serif";
                 ctx.fillText("Drag grip to reorder • click card to expand • menu for duplicate/remove", hintRect.x + 12, hintRect.y + 15);
             }
 
@@ -868,8 +868,8 @@ app.registerExtension({
 
                 ctx.save();
                 ctx.shadowColor = THEME.shadow;
-                ctx.shadowBlur = 12;
-                ctx.shadowOffsetY = 6;
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetY = 2;
                 roundRect(ctx, panelX, cursorY, panelW, computeWidgetHeight() - PAD * 2, RADIUS + 2);
                 ctx.fillStyle = THEME.canvas;
                 ctx.fill();

@@ -15,7 +15,7 @@ jobs:
   publish-node:
     name: Publish Custom Node to registry
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'capitan01R' }}
+    if: ${{ github.repository_owner == 'TuZZiL' }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
