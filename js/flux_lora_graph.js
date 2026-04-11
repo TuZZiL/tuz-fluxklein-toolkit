@@ -42,22 +42,22 @@ const DB_FRAC = N_DOUBLE / (N_DOUBLE + N_SINGLE);  // 8/32 = 0.25
 const SB_FRAC = N_SINGLE / (N_DOUBLE + N_SINGLE);  // 24/32 = 0.75
 
 const THEME = {
-    panel: "#181818",
-    panelBorder: "#2f2f2f",
-    surface: "#111111",
-    surfaceRaised: "#1e1e1e",
-    surfaceMuted: "#242424",
-    line: "#363636",
-    lineSoft: "rgba(255,255,255,0.09)",
-    text: "#d5d5d5",
-    textMuted: "#9a9a9a",
-    accent: "#b9b9b9",
-    img: "#7f8790",
-    txt: "#6f7d88",
-    single: "#8a8a8a",
-    active: "#f2f2f2",
+    panel: "#161616",
+    panelBorder: "#2a2a2a",
+    surface: "#131313",
+    surfaceRaised: "#1b1b1b",
+    surfaceMuted: "#222222",
+    line: "#353535",
+    lineSoft: "rgba(255,255,255,0.08)",
+    text: "#d0d0d0",
+    textMuted: "#8d8d8d",
+    accent: "#bcbcbc",
+    img: "#8a8a8a",
+    txt: "#7d7d7d",
+    single: "#909090",
+    active: "#f5f5f5",
     tooltipBg: "#101010",
-    tooltipBorder: "#303030",
+    tooltipBorder: "#2f2f2f",
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));

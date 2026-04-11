@@ -130,6 +130,19 @@ Available schedules:
 | **Strong Start** | `1.0 → 0.5 → 0.2 → 0.0` | Aggressive fade-out for maximum reference preservation |
 | **Pulse** | `0.3 → 1.0 → 1.0 → 0.3` | Peak effect in mid steps |
 
+### Companion Conditioning Nodes
+
+These nodes control reference-latent behavior and prompt-conditioning without changing the LoRA loader pipeline.
+
+| Node | What it does |
+|---|---|
+| `Flux2KleinRefLatentController` | Scales one reference image inside the model attention path. |
+| `Flux2KleinTextRefBalance` | Balances text vs reference influence with a single slider. |
+| `Flux2KleinMaskRefController` | Uses a mask to protect or free areas of the reference latent. |
+| `Flux2KleinColorAnchor` | Keeps reference colors closer to the source during sampling. |
+
+These nodes are designed to be simple ComfyUI-style controls: one job per node, plain widgets, and no extra visual chrome.
+
 ## Edit Mode Presets
 
 Think of `edit_mode` as a **protection level**, not as a category label for the LoRA itself. Different edit LoRAs can belong to the same practical bucket:

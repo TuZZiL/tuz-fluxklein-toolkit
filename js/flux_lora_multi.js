@@ -26,23 +26,23 @@ const BALANCE_RANGE = { min: 0.0, max: 1.0, step: 0.05, precision: 2 };
 
 const THEME = {
     canvas: "#151515",
-    surface0: "#1a1a1a",
+    surface0: "#181818",
     surface1: "#202020",
-    surface2: "#262626",
-    surface3: "#2c2c2c",
-    border: "#343434",
-    borderStrong: "#4a4a4a",
-    text: "#dedede",
-    textSoft: "#b7b7b7",
-    textMuted: "#919191",
+    surface2: "#252525",
+    surface3: "#2b2b2b",
+    border: "#333333",
+    borderStrong: "#474747",
+    text: "#d7d7d7",
+    textSoft: "#b8b8b8",
+    textMuted: "#8e8e8e",
     accent: "#d0d0d0",
-    accentSoft: "#f2f2f2",
-    success: "#dddddd",
-    successBg: "#252525",
+    accentSoft: "#f0f0f0",
+    success: "#d6d6d6",
+    successBg: "#242424",
     warning: "#d4d4d4",
-    warningBg: "#252525",
-    danger: "#efefef",
-    dangerBg: "#252525",
+    warningBg: "#242424",
+    danger: "#e8e8e8",
+    dangerBg: "#242424",
     shadow: "rgba(0,0,0,0.14)",
 };
 
@@ -866,14 +866,9 @@ app.registerExtension({
                 const panelW = width - PAD * 2;
                 let cursorY = y + PAD;
 
-                ctx.save();
-                ctx.shadowColor = THEME.shadow;
-                ctx.shadowBlur = 4;
-                ctx.shadowOffsetY = 2;
                 roundRect(ctx, panelX, cursorY, panelW, computeWidgetHeight() - PAD * 2, RADIUS + 2);
                 ctx.fillStyle = THEME.canvas;
                 ctx.fill();
-                ctx.restore();
 
                 drawHeader(ctx, panelX, cursorY, panelW);
                 cursorY += HEADER_H + ROW_GAP;

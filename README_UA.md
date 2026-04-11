@@ -130,6 +130,19 @@ FluxLoraScheduled → MODEL → CFGGuider
 | **Strong Start** | `1.0 → 0.5 → 0.2 → 0.0` | Агресивний fade-out для максимального збереження |
 | **Pulse** | `0.3 → 1.0 → 1.0 → 0.3` | Піковий ефект в середніх кроках |
 
+### Companion conditioning-ноди
+
+Ці ноди керують reference-latent та conditioning поведінкою, не втручаючись у pipeline LoRA loader.
+
+| Нода | Що робить |
+|---|---|
+| `Flux2KleinRefLatentController` | Керує силою окремого reference image в attention path. |
+| `Flux2KleinTextRefBalance` | Балансує текст і reference одним повзунком. |
+| `Flux2KleinMaskRefController` | Використовує маску, щоб захищати або відпускати області reference latent. |
+| `Flux2KleinColorAnchor` | Тримає кольори reference ближче до джерела під час семплінгу. |
+
+Ці ноди зроблені в простому ComfyUI-стилі: одна нода = одна задача, стандартні поля, без зайвої візуальної обгортки.
+
 ## Пресети редагування
 
 Краще думати про `edit_mode` як про **рівень захисту**, а не як про “тип LoRA”. Різні edit LoRA на Klein можуть поводитися дуже по-різному:
