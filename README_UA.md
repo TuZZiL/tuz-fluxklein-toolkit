@@ -54,7 +54,7 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 
 ## Ноди
 
-### FLUX LoRA Loader
+### TUZ FLUX LoRA Loader
 
 Завантажувач однієї LoRA з інтерактивним графом per-layer strength та опціональним auto-strength.
 
@@ -73,7 +73,7 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 
 **Auto-strength:** Коли увімкнено, нода аналізує тензори ваг LoRA і обчислює оптимальні per-layer strengths автоматично. Бари графа заповнюються автоматично — ви все ще можете вручну підправити їх.
 
-### FLUX LoRA Multi
+### TUZ FLUX LoRA Multi
 
 **Динамічний multi-LoRA завантажувач** з per-slot контролем. Натисніть **"+ Add LoRA"** щоб додати слот, **"✕"** щоб видалити.
 
@@ -97,7 +97,7 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 Слот 3: enhancer LoRA      → edit_mode=Auto (або None),          strength=0.2-0.4
 ```
 
-### FLUX LoRA Scheduled
+### TUZ FLUX LoRA Scheduled
 
 **Per-step контроль сили LoRA** через вбудовану систему Hook Keyframes ComfyUI. Замість постійної сили, ефект LoRA змінюється протягом кроків. Приймає conditioning на вхід і повертає модифікований conditioning — окрема утилітна нода не потрібна.
 
@@ -136,10 +136,10 @@ FluxLoraScheduled → MODEL → CFGGuider
 
 | Нода | Що робить |
 |---|---|
-| `Flux2KleinRefLatentController` | Керує силою окремого reference image в attention path. |
-| `Flux2KleinTextRefBalance` | Балансує текст і reference одним повзунком. |
-| `Flux2KleinMaskRefController` | Використовує маску, щоб захищати або відпускати області reference latent. |
-| `Flux2KleinColorAnchor` | Тримає кольори reference ближче до джерела під час семплінгу. |
+| `TUZ FLUX.2 Klein Ref Latent Controller` | Керує силою окремого reference image в attention path. |
+| `TUZ FLUX.2 Klein Text/Ref Balance` | Балансує текст і reference одним повзунком. |
+| `TUZ FLUX.2 Klein Mask Ref Controller` | Використовує маску, щоб захищати або відпускати області reference latent. |
+| `TUZ FLUX.2 Klein Color Anchor` | Тримає кольори reference ближче до джерела під час семплінгу. |
 
 Ці ноди зроблені в простому ComfyUI-стилі: одна нода = одна задача, стандартні поля, без зайвої візуальної обгортки.
 

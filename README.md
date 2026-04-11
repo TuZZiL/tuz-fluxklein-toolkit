@@ -54,7 +54,7 @@ Requires `numpy` (usually already installed with ComfyUI).
 
 ## Nodes
 
-### FLUX LoRA Loader
+### TUZ FLUX LoRA Loader
 
 Single LoRA loader with interactive per-layer graph widget and optional auto-strength.
 
@@ -73,7 +73,7 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 
 **Auto-strength:** When enabled, the node analyzes the LoRA's weight tensors and computes optimal per-layer strengths automatically. The graph bars auto-populate — you can still manually tweak them afterwards.
 
-### FLUX LoRA Multi
+### TUZ FLUX LoRA Multi
 
 **Dynamic multi-LoRA loader** with per-slot control. Click **"+ Add LoRA"** to add slots, **"✕"** to remove.
 
@@ -97,7 +97,7 @@ Slot 2: consistency LoRA   → edit_mode=Auto (or None),          strength=0.4-0
 Slot 3: enhancer LoRA      → edit_mode=Auto (or None),          strength=0.2-0.4
 ```
 
-### FLUX LoRA Scheduled
+### TUZ FLUX LoRA Scheduled
 
 **Per-step LoRA strength control** using ComfyUI's native Hook Keyframes system. Instead of constant strength, the LoRA effect varies across sampling steps. Takes conditioning as input and returns modified conditioning directly — no extra utility node needed.
 
@@ -136,10 +136,10 @@ These nodes control reference-latent behavior and prompt-conditioning without ch
 
 | Node | What it does |
 |---|---|
-| `Flux2KleinRefLatentController` | Scales one reference image inside the model attention path. |
-| `Flux2KleinTextRefBalance` | Balances text vs reference influence with a single slider. |
-| `Flux2KleinMaskRefController` | Uses a mask to protect or free areas of the reference latent. |
-| `Flux2KleinColorAnchor` | Keeps reference colors closer to the source during sampling. |
+| `TUZ FLUX.2 Klein Ref Latent Controller` | Scales one reference image inside the model attention path. |
+| `TUZ FLUX.2 Klein Text/Ref Balance` | Balances text vs reference influence with a single slider. |
+| `TUZ FLUX.2 Klein Mask Ref Controller` | Uses a mask to protect or free areas of the reference latent. |
+| `TUZ FLUX.2 Klein Color Anchor` | Keeps reference colors closer to the source during sampling. |
 
 These nodes are designed to be simple ComfyUI-style controls: one job per node, plain widgets, and no extra visual chrome.
 

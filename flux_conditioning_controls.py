@@ -438,8 +438,8 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Flux2KleinRefLatentController": "FLUX.2 Klein Ref Latent Controller",
-    "Flux2KleinTextRefBalance": "FLUX.2 Klein Text/Ref Balance",
-    "Flux2KleinMaskRefController": "FLUX.2 Klein Mask Ref Controller",
-    "Flux2KleinColorAnchor": "FLUX.2 Klein Color Anchor",
+    "Flux2KleinRefLatentController": "TUZ FLUX.2 Klein Ref Latent Controller",
+    "Flux2KleinTextRefBalance": "TUZ FLUX.2 Klein Text/Ref Balance",
+    "Flux2KleinMaskRefController": "TUZ FLUX.2 Klein Mask Ref Controller",
+    "Flux2KleinColorAnchor": "TUZ FLUX.2 Klein Color Anchor",
 }

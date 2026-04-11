@@ -684,7 +684,7 @@ class FluxLoraLoader:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_lora"
     CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX LoRA Loader"
+    TITLE = "TUZ FLUX LoRA Loader"
 
     def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
@@ -743,7 +743,7 @@ class FluxLoraMulti:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_loras"
     CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX LoRA Multi"
+    TITLE = "TUZ FLUX LoRA Multi"
 
     def load_loras(self, model, auto_convert=True, slot_data="[]"):
         try:
@@ -826,7 +826,7 @@ class FluxLoraComposer:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "compose_loras"
     CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX LoRA Composer"
+    TITLE = "TUZ FLUX LoRA Composer"
 
     def compose_loras(self, model, goal="Edit", safety="Balanced",
                       auto_normalize=True, auto_convert=True, slot_data="[]"):
@@ -963,7 +963,7 @@ class FluxLoraScheduled:
     RETURN_NAMES = ("model", "conditioning")
     FUNCTION = "load_lora"
     CATEGORY = "loaders/FLUX"
-    TITLE = "FLUX LoRA Scheduled"
+    TITLE = "TUZ FLUX LoRA Scheduled"
 
     def load_lora(self, model, conditioning, lora_name, strength, use_case="Edit", schedule="Fade Out",
                   edit_mode="Auto", balance=0.5, auto_convert=True, keyframes=5):
@@ -1028,8 +1028,8 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FluxLoraLoader":    "FLUX LoRA Loader",
-    "FluxLoraMulti":     "FLUX LoRA Multi",
-    "FluxLoraComposer":  "FLUX LoRA Composer",
-    "FluxLoraScheduled": "FLUX LoRA Scheduled",
+    "FluxLoraLoader":    "TUZ FLUX LoRA Loader",
+    "FluxLoraMulti":     "TUZ FLUX LoRA Multi",
+    "FluxLoraComposer":  "TUZ FLUX LoRA Composer",
+    "FluxLoraScheduled": "TUZ FLUX LoRA Scheduled",
 }
