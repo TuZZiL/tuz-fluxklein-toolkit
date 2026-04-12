@@ -1,439 +1,368 @@
 # ComfyUI FLUX.2 Klein LoRA Loader
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Завантажувач LoRA для **FLUX.2 Klein** (9B) у ComfyUI.
 
 [English version](README.md)
 
-## Навіщо це замість стандартного LoRA loader?
+---
 
-Більшість LoRA, які ви завантажуєте, натреновані інструментами HuggingFace і збережені у **diffusers форматі**. Стандартний ComfyUI LoRA loader **мовчки губить** більшу частину цих ваг на Klein 9B — LoRA ніби завантажується, але ледь працює або виглядає неправильно.
+## Проблема
 
-Цей пакет **автоматично конвертує** будь-який формат LoRA для коректної роботи з Klein 9B. Просто підключіть свою LoRA — і вона працює на повну.
+Більшість LoRA натреновані інструментами HuggingFace і збережені у **diffusers форматі**. Стандартний LoRA loader ComfyUI **мовчки губить** більшу частину цих ваг на Klein 9B — LoRA ніби завантажується, але ледь працює або виглядає неправильно.
 
-Але це не все. Коли ви використовуєте LoRA для **редагування зображень** (зміна одягу, додавання аксесуарів, перенос стилю на reference фото), LoRA часто **руйнує обличчя** або змінює пропорції тіла. Цей пакет вирішує це через **пресети редагування** — один dropdown, який вказує загрузчику які частини зображення захищати:
+Крім того, при **редагуванні зображень** через LoRA (зміна одягу, аксесуарів, стилю) LoRA часто **руйнує обличчя** або змінює пропорції тіла.
 
-- **Preserve Face** — редагуйте вільно, зберігаючи обличчя
-- **Preserve Body** — захист і обличчя, і пропорцій тіла (фігура, поза)
-- **Auto** — загрузчик аналізує вашу LoRA і сам обирає найкращий захист
+## Рішення
 
-Результат: ваші зміни застосовуються там де потрібно, а все інше залишається недоторканим.
+Цей пакет нод робить дві речі:
 
-## Можливості
+1. **Автоматично конвертує** будь-який формат LoRA для коректної роботи з Klein 9B
+2. **Захищає те, що ви хочете зберегти** — обличчя, тіло, або стиль — одним dropdown
 
-- **3 сфокусовані ноди + 1 advisor**: Loader (одна LoRA + граф), Multi (динамічні слоти), Scheduled (темпоральний контроль), Preflight Advisor (рекомендації перед запуском)
-- **Автовизначення формату**: Підтримка native, diffusers та Musubi Tuner (PEFT) LoRA
-- **Block-diagonal QKV fusion**: Коректне об'єднання окремих Q/K/V проєкцій у fused матриці
-- **Пресети редагування**: Збереження обличчя, тіла або стилю при редагуванні через LoRA
-- **Auto режим**: Аналізує ваги LoRA і автоматично обирає найкращий пресет
-- **Auto-strength**: Вбудована per-layer калібрація сили через ΔW аналіз
-- **Динамічний multi-slot**: Додавання/видалення слотів LoRA з per-slot edit_mode (rgthree-стиль)
-- **Scheduling по кроках**: Зміна сили LoRA протягом sampling steps
-- **GGUF сумісність**: Працює з квантованими моделями через ComfyUI-GGUF
+Просто оберіть пресет, підключіть LoRA і працюйте.
 
-## Передумови
+---
 
-LoRA натреновані для FLUX моделей часто поставляються у diffusers форматі — окремі `to_q`, `to_k`, `to_v` проєкції. Нативна архітектура FLUX зберігає їх як єдину QKV матрицю, а single blocks об'єднують attention і MLP в один `linear1`. Завантаження таких LoRA без конвертації означає що більшість attention ваг просто не потрапляють у модель.
+## Швидкий старт (2 хвилини)
 
-| Що в LoRA | Що очікує FLUX | Що робить цей пакет |
-|---|---|---|
-| Окремі `to_q` / `to_k` / `to_v` | Об'єднана `img_attn.qkv` / `txt_attn.qkv` | Block-diagonal fusion при завантаженні |
-| Окремі компоненти single block | Об'єднана `linear1` `[36864, 4096]` | Правильне злиття `[q, k, v, proj_mlp]` |
-| Musubi Tuner `.default.` ключі | Стандартні LoRA ключі | Авто-стрипання та ремапінг |
-| Тільки глобальна сила | Незалежні img/txt + per-single-block | Інтерактивний віджет + авто-калібрація |
-| LoRA впливає на все однаково | Різні шари контролюють різні аспекти | **Пресети** для селективного контролю |
-
-## Встановлення
+### Крок 1: Встановлення
 
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
+# Перезапустіть ComfyUI
 ```
 
-Потребує `numpy` (зазвичай вже встановлено з ComfyUI).
+Потребує `numpy` (зазвичай вже є з ComfyUI).
+Для `TUZ Klein Edit Composite` ще: `pip install opencv-python-headless`
 
-## Ноди
+### Крок 2: Додайте ноду
 
-### TUZ FLUX Preflight Advisor
+Знайдіть **TUZ FLUX LoRA Loader** в меню нод у категорії `loaders/FLUX`. Підключіть вхід `MODEL`.
 
-Окрема advisory-нода для перевірки LoRA перед запуском. Вона аналізує файл LoRA та сумісність із ключами моделі і повертає рекомендації без зміни workflow.
+### Крок 3: Виберіть LoRA і генеруйте
 
-| Вихід | Тип | Опис |
+1. Оберіть файл LoRA
+2. Поставте `edit_mode` → **Auto** (рекомендований старт)
+3. Поставте `strength` → **0.7** (безпечний default)
+4. Генеруйте!
+
+Все. Auto режим аналізує ваги LoRA і сам обирає найкращий рівень захисту. Далі підлаштовуйте під себе.
+
+---
+
+## Огляд нод
+
+Пакет містить **7 нод** у 3 групах:
+
+### Завантаження LoRA (ядро)
+
+| Нода | Призначення | Коли використовувати |
 |---|---|---|
-| `report` | STRING | Людиночитаний підсумок із warnings і поясненням. |
-| `recommended_edit_mode` | STRING | Рекомендований preset захисту. |
-| `recommended_balance` | FLOAT | Рекомендований balance для preset'а. |
-| `recommended_strength` | FLOAT | Безпечний стартовий strength для LoRA. |
-| `compat_status` | STRING | `ok`, `partial` або `failed`. |
-| `matched_modules` | INT | Скільки модулів LoRA збіглося з моделлю. |
-| `total_modules` | INT | Загальна кількість повних модулів LoRA. |
+| **TUZ FLUX LoRA Loader** | Одна LoRA + інтерактивний граф | Ваш щоденний інструмент для 1 LoRA |
+| **TUZ FLUX LoRA Multi** | Кілька LoRA, динамічні слоти | Стекінг 2-4 LoRA (edit + consistency + style) |
+| **TUZ FLUX LoRA Scheduled** | Криві сили по кроках | Коли LoRA має затухати/наростати під час семплінгу |
 
-Multi-версія використовує ту саму JSON-структуру слотів, що й `TUZ FLUX LoRA Multi`, і повертає `recommended_slot_data_json`. Вона не аналізує і не рекомендує `schedule`.
+### Conditioning (допоміжні інструменти)
 
-Коротка термінологія:
-- `recommended_edit_mode=None` означає **Raw / No Protection**, а не “значення відсутнє”
-- `recommended_balance` — це скільки ефекту пресету зберігати:
-  `0.0 = найсильніший ефект пресету`, `1.0 = сира поведінка LoRA`
+| Нода | В одному реченні |
+|---|---|
+| **Ref Latent Controller** | "Зробити reference image сильнішим/слабшим в attention" |
+| **Text/Ref Balance** | "Дати prompt більше влади або міцніше тримати reference" |
+| **Mask Ref Controller** | "Захистити або послабити конкретні області reference" |
+| **Color Anchor** | "Не дати кольорам пливти під час семплінгу" |
+
+### Аналіз та постобробка
+
+| Нода | Призначення |
+|---|---|
+| **TUZ FLUX Preflight Advisor** | Аналіз LoRA перед запуском — отримати рекомендовані налаштування |
+| **TUZ Klein Edit Composite** | Злити згенерований edit назад на оригінальне зображення (після decode) |
+
+---
+
+## Пресети редагування — ключова концепція
+
+Думайте про `edit_mode` як про **регулятор захисту**, а не як про категорію LoRA:
+
+| Пресет | Що захищає | Найкраще для |
+|---|---|---|
+| **Auto** ⭐ | Аналізує ваги LoRA, обирає сам | Починайте тут — працює для більшості LoRA |
+| **Preserve Face** | Обличчя та ідентичність | Одяг/аксесуари/макіяж |
+| **Preserve Body** | Обличчя + пропорції тіла | Try-on, заміна outfit |
+| **Style Only** | Структуру (зменшує image stream) | Aesthetic/painterly LoRA |
+| **Edit Subject** | Помірний захист ідентичності | Зміна об'єктів зі збереженням identity |
+| **Boost Prompt** | Нічого (підсилює текст натомість) | Коли prompt занадто слабкий |
+| **None** | Нічого | "Сира" LoRA, повна свобода |
+
+### Повзунок `balance`
+
+Інтерполює між захистом пресету та "сирою" LoRA:
+
+```
+0.0 ◄━━━━━━━━━━━━━━━━━━━━━► 1.0
+Повний ефект пресету        "Сира" LoRA (без захисту)
+(максимальний захист)       
+```
+
+**Правило:**
+- LoRA перезаписує обличчя? → Зменшуйте `balance` до 0.0
+- Edit занадто слабкий або "перестрахований"? → Збільшуйте до 1.0
+
+### Edit vs Generate (`use_case`)
+
+Впливає лише на **Auto** режим:
+
+- **Edit** → Auto більш консервативний (береже ідентичність/структуру)
+- **Generate** → Auto дає LoRA більше свободи (text-to-image, restyle)
+
+Ручні пресети завжди працюють рівно так, як ви їх обрали, незалежно від `use_case`.
+
+---
+
+## Детальний довідник нод
 
 ### TUZ FLUX LoRA Loader
 
-Завантажувач однієї LoRA з інтерактивним графом per-layer strength та опціональним auto-strength.
+Завантажувач однієї LoRA з інтерактивним per-layer графом та optional auto-strength.
 
 | Вхід | Тип | Опис |
 |---|---|---|
 | `model` | MODEL | Модель FLUX.2 Klein / FLUX.1 |
 | `lora_name` | dropdown | Файл LoRA з `models/loras` |
 | `strength` | float | Глобальна сила LoRA (-5.0 до 5.0) |
-| `use_case` | dropdown | Підказує Auto, чи ви редагуєте reference-зображення, чи робите вільнішу генерацію |
+| `use_case` | dropdown | Підказує Auto: ви редагуєте reference чи генеруєте вільно |
 | `auto_convert` | boolean | Конвертувати diffusers-формат у нативний FLUX |
-| `auto_strength` | boolean | Увімкнено: вирівнює нерівномірні LoRA через авто per-layer strength на основі ΔW аналізу |
-| `edit_mode` | dropdown | Наскільки “захисно” поводитися з LoRA; `Auto` — рекомендований старт |
-| `balance` | float | 0.0 = найсильніший ефект пресету, 1.0 = “сирa” поведінка LoRA |
+| `auto_strength` | boolean | Авто-обчислення per-layer strength з ΔW аналізу |
+| `edit_mode` | dropdown | Рівень захисту — `Auto` рекомендований старт |
+| `balance` | float | 0.0 = повний захист пресету, 1.0 = "сира" LoRA |
 
-**Граф-віджет:** Показує double blocks (8 колонок, img фіолетові / txt бірюзові, розділені верх/низ) та single blocks (24 колонки, зелені). Перетягуйте для налаштування. Shift+drag рухає всі бари в секції. Клік перемикає бар вкл/викл.
+**Граф-віджет:** 8 double-block колонок (img фіолетові / txt бірюзові) + 24 single-block колонки (зелені).
+- Перетягуйте для налаштування
+- Shift+drag рухає всі бари в секції
+- Клік перемикає бар вкл/викл
 
-**Auto-strength:** Коли увімкнено, нода аналізує тензори ваг LoRA і обчислює оптимальні per-layer strengths автоматично. Бари графа заповнюються автоматично — ви все ще можете вручну підправити їх.
+**Auto-strength:** Аналізує тензори ваг LoRA і автоматично заповнює оптимальні per-layer strengths. Після цього ви все ще можете вручну підправити.
 
 ### TUZ FLUX LoRA Multi
 
-**Динамічний multi-LoRA завантажувач** з per-slot контролем. Натисніть **"+ Add LoRA"** щоб додати слот, **"✕"** щоб видалити.
+Динамічний multi-LoRA завантажувач. Натисніть **"+ Add LoRA"** для нового слоту, **"✕"** для видалення.
 
-Кожен слот має:
-- **Enabled** перемикач
-- **LoRA** dropdown
-- **Strength** (-5.0 до 5.0)
-- **Use case** (Edit або Generate)
-- **Edit mode** (None, Preserve Face, Preserve Body, Style Only, Edit Subject, Boost Prompt, Auto)
-- **Balance** (0.0 до 1.0)
+Кожен слот має: Enabled перемикач, LoRA dropdown, Strength, Use case, Edit mode, Balance.
 
 | Вхід | Тип | Опис |
 |---|---|---|
 | `model` | MODEL | Модель FLUX.2 Klein / FLUX.1 |
-| `auto_convert` | boolean | Конвертувати diffusers-формат у нативний FLUX |
+| `auto_convert` | boolean | Конвертувати diffusers-формат |
 
-Рекомендоване налаштування для редагування:
+**Рекомендоване налаштування для редагування зображень:**
+
 ```
-Слот 1: editing LoRA       → edit_mode=Auto (або Preserve Body), strength=0.6-0.8
-Слот 2: consistency LoRA   → edit_mode=Auto (або None),          strength=0.4-0.6
-Слот 3: enhancer LoRA      → edit_mode=Auto (або None),          strength=0.2-0.4
+Слот 1: editing LoRA       → edit_mode=Auto, strength=0.6–0.8
+Слот 2: consistency LoRA   → edit_mode=Auto, strength=0.4–0.6
+Слот 3: enhancer LoRA      → edit_mode=None, strength=0.2–0.4
 ```
 
 ### TUZ FLUX LoRA Scheduled
 
-**Per-step контроль сили LoRA** через вбудовану систему Hook Keyframes ComfyUI. Замість постійної сили, ефект LoRA змінюється протягом кроків. Приймає conditioning на вхід і повертає модифікований conditioning — окрема утилітна нода не потрібна.
+Per-step контроль сили LoRA через Hook Keyframes ComfyUI. Ефект LoRA змінюється протягом кроків семплінгу. Приймає conditioning і повертає модифікований — окрема утилітна нода не потрібна.
 
 | Вхід | Тип | Опис |
 |---|---|---|
 | `model` | MODEL | Модель FLUX.2 Klein |
-| `conditioning` | CONDITIONING | Базовий conditioning (hooks прикріплюються автоматично) |
+| `conditioning` | CONDITIONING | Базовий conditioning |
 | `lora_name` | dropdown | Файл LoRA |
 | `strength` | float | Базова сила LoRA (0.0–2.0) |
-| `use_case` | dropdown | Підказує Auto, чи важливіше зберегти reference, чи дати LoRA більше свободи |
 | `schedule` | dropdown | Профіль кривої сили |
-| `edit_mode` | dropdown | Наскільки “захисно” поводитися з LoRA (підтримує Auto) |
-| `balance` | float | 0.0 = найсильніший ефект пресету, 1.0 = “сирa” поведінка LoRA |
-| `keyframes` | int | Кількість keyframes (2-10, за замовч. 5) |
+| `edit_mode` | dropdown | Рівень захисту (підтримує Auto) |
+| `balance` | float | Ефект пресету ↔ "сира" LoRA |
+| `keyframes` | int | Кількість keyframes (2–10) |
 
 **Повертає:** `MODEL` + `CONDITIONING`
 
-```
-FluxLoraScheduled → MODEL → CFGGuider
-                  → CONDITIONING → ReferenceLatent → CFGGuider
-```
-
-Доступні розклади:
-
-| Розклад | Крива | Коли використовувати |
+| Розклад | Крива | Найкраще для |
 |---|---|---|
-| **Constant** | `1.0 → 1.0 → 1.0 → 1.0` | Стандартна поведінка (без scheduling) |
-| **Fade Out** | `1.0 → 0.7 → 0.3 → 0.0` | Editing: зміни на початку, відновлення reference в кінці |
-| **Fade In** | `0.0 → 0.3 → 0.7 → 1.0` | Деталізація: спочатку reference, потім LoRA |
-| **Strong Start** | `1.0 → 0.5 → 0.2 → 0.0` | Агресивний fade-out для максимального збереження |
-| **Pulse** | `0.3 → 1.0 → 1.0 → 0.3` | Піковий ефект в середніх кроках |
+| **Constant** | `1.0 → 1.0 → 1.0` | Стандартна поведінка |
+| **Fade Out** | `1.0 → 0.7 → 0.3 → 0.0` | Зміни на початку, reference в кінці |
+| **Fade In** | `0.0 → 0.3 → 0.7 → 1.0` | Спочатку reference, потім LoRA |
+| **Strong Start** | `1.0 → 0.5 → 0.2 → 0.0` | Агресивне затухання, макс збереження |
+| **Pulse** | `0.3 → 1.0 → 1.0 → 0.3` | Пік в середніх кроках |
 
-### Companion conditioning-ноди
+### TUZ FLUX Preflight Advisor
 
-Ці ноди керують reference-latent та conditioning поведінкою, не втручаючись у pipeline LoRA loader.
+Аналізує файл LoRA + сумісність з моделлю і повертає рекомендації **без зміни** чого-небудь.
 
-| Нода | Що робить |
+| Вихід | Тип | Опис |
+|---|---|---|
+| `report` | STRING | Людиночитаний підсумок із warnings |
+| `recommended_edit_mode` | STRING | Рекомендований пресет |
+| `recommended_balance` | FLOAT | Рекомендований balance |
+| `recommended_strength` | FLOAT | Безпечний стартовий strength |
+| `compat_status` | STRING | `ok`, `partial` або `failed` |
+| `matched_modules` | INT | Модулі LoRA, сумісні з моделлю |
+| `total_modules` | INT | Загальна кількість модулів LoRA |
+
+> **Важливо:** `recommended_edit_mode=None` означає "Raw / No Protection", а не "нічого не обрано".
+
+Multi-версія (`TUZ FLUX Multi Preflight Advisor`) приймає той самий JSON-формат слотів, що й `TUZ FLUX LoRA Multi`.
+
+---
+
+## Companion conditioning-ноди
+
+Це **невеликі коригуючі інструменти**, які сидять поруч з LoRA loader у графі. Вони не замінюють loader — вони уточнюють взаємодію reference image та prompt.
+
+**Базовий flow:**
+```
+reference image → VAE Encode → ReferenceLatent
+text prompt → conditioning
+LoRA loader → model
+companion nodes → conditioning/model
+sampler → decode → TUZ Klein Edit Composite
+```
+
+### Ref Latent Controller
+
+Керує тим, наскільки сильно reference image впливає на attention path моделі.
+
+**Коли потрібен:** Reference занадто домінує або занадто слабкий у результаті.
+
+| Параметр | Що робить |
 |---|---|
-| `TUZ FLUX.2 Klein Ref Latent Controller` | Керує силою одного або всіх reference image в attention path, з optional балансом appearance/detail перед патчингом. |
-| `TUZ FLUX.2 Klein Text/Ref Balance` | Балансує текст і reference одним повзунком, або через attention patch, або через прямий latent mix. |
-| `TUZ FLUX.2 Klein Mask Ref Controller` | Використовує маску, щоб захищати, послаблювати або частково замінювати області одного чи кількох reference latent. |
-| `TUZ FLUX.2 Klein Color Anchor` | Тримає кольори reference ближче до джерела під час семплінгу, з підтримкою усереднення кількох reference. |
+| `strength` | Загальний вплив reference (1.0 = норма, >1 = сильніше, <1 = слабше) |
+| `reference_index` | Який reference таргетити (`-1` = всі) |
+| `appearance_scale` | Підсилити coarse appearance (колір, форма) |
+| `detail_scale` | Послабити fine detail (текстури, дрібні елементи) |
 
-Ці ноди зроблені в простому ComfyUI-стилі: одна нода = одна задача, стандартні поля, без зайвої візуальної обгортки.
+**Для "зберегти identity, але зменшити жорсткість":**
+- `appearance_scale=1.15`, `detail_scale=0.75`, `blur_radius=2`
 
-Практичні оновлення в поточній версії:
-- **Multi-reference aware**: `reference_index` / `target_reference_index` можуть працювати з одним reference або з усіма (`-1`) залежно від ноди.
-- **Mask mix modes**: `TUZ FLUX.2 Klein Mask Ref Controller` тепер підтримує `mask_action=scale|mix`. У режимі `mix` masked області можна замінювати через `zeros`, `gaussian_noise`, `channel_mean` або `lowpass_reference`.
-- **Prompt/reference balance modes**: `TUZ FLUX.2 Klein Text/Ref Balance` зберігає старий `attn_patch` режим за замовчуванням і також підтримує `latent_mix` для прямого контролю reference latent.
-- **Appearance/detail rebalance**: `TUZ FLUX.2 Klein Ref Latent Controller` тепер може окремо підсилювати coarse appearance і послаблювати fine detail перед масштабуванням attention-path.
+### Text/Ref Balance
 
-Коротка термінологія:
-- `reference_index` / `target_reference_index`:
-  `0` = перший reference, `1` = другий, `-1` = усі reference
-- `attn_patch`:
-  змінює силу reference всередині attention під час семплінгу
-- `latent_mix`:
-  послаблює або частково замінює reference latent ще до семплінгу
-- `mask_action=scale`:
-  зберігає той самий reference latent і лише приглушує його
-- `mask_action=mix`:
-  підміняє masked області іншим latent signal
-- `channel_mask_start=0` і `channel_mask_end=0`:
-  використовують повний діапазон latent channels, якщо ви свідомо не звужуєте його
+Один повзунок: дати prompt більше сили або міцніше притиснутися до reference.
 
-### Практичні workflow для Companion conditioning-нод
+**Коли потрібен:** Prompt зміни не проходять, або reference надто домінує.
 
-Найкраще ці ноди працюють як **невеликі коригуючі інструменти** навколо звичайного Klein edit graph, а не як заміна LoRA loader.
+| Параметр | Що робить |
+|---|---|
+| `balance` | 0.0 = reference сильніший, 1.0 = текст перезаписує агресивніше |
+| `balance_mode` | `attn_patch` (м'яко, default) або `latent_mix` (жорсткіше втручання) |
 
-Базовий рекомендований flow:
-```text
-reference image -> VAE Encode -> ReferenceLatent
-text prompt -> conditioning
-LoRA loader -> model
-conditioning companion nodes -> conditioning/model
-sampler -> decode -> TUZ Klein Edit Composite
-```
-
-#### 1. Сильніше тримати identity під час зміни одягу або аксесуарів
-
-Використання:
-```text
-ReferenceLatent -> TUZ FLUX.2 Klein Text/Ref Balance -> CFGGuider
-                                      \-> TUZ FLUX.2 Klein Ref Latent Controller -> model
-```
-
-Стартові значення:
-- `Text/Ref Balance`: `balance=0.55` до `0.70`
-- `Ref Latent Controller`: `strength=1.1` до `1.4`
-- якщо reference кілька, ставте `reference_index=-1` лише тоді, коли всі reference мають однаково сильно впливати
-
-Практичний ефект:
-- зміни з prompt усе ще проходять
-- face і базова структура менше пливуть
-- добре підходить для try-on, accessory swap і identity-sensitive edit
-
-#### 2. Захистити або послабити лише одну область reference
-
-Використання:
-```text
-conditioning -> TUZ FLUX.2 Klein Mask Ref Controller -> sampler
-```
-
-Стартові значення:
-- `mask_action=scale`
-- `strength=0.7` до `1.0`
-- `channel_mode=all`
-- `feather=8` до `20`
-
-Коли переходити на `mask_action=mix`:
-- masked область усе ще занадто сильно тягне структуру
-- потрібне жорсткіше прибирання або заміна сигналу в цій зоні
-
-Хороші стартові `mix` режими:
-- `replace_mode=zeros` для найсильнішого приглушення
-- `replace_mode=lowpass_reference` для м’якшого очищення зі збереженням coarse structure
-- `target_reference_index=-1` тільки коли маску треба однаково застосувати до всіх reference
-
-#### 3. Дати prompt більше сили або, навпаки, сильніше притиснутись до reference
-
-Використання:
-```text
-conditioning -> TUZ FLUX.2 Klein Text/Ref Balance
-```
-
-Режими:
-- `balance_mode=attn_patch`:
-  найкращий default; м’який контроль під час семплінгу
-- `balance_mode=latent_mix`:
-  сильніше втручання; напряму зменшує вплив reference latent
-
-Старт:
+**Правило:**
 - `attn_patch` для більшості edit-сценаріїв
-- `latent_mix` лише коли prompt стабільно недопрацьовує або reference надто домінує
+- `latent_mix` тільки коли prompt стабільно недопрацьовує
 
-Правило:
-- знижуйте `balance` до `0.25`, якщо треба ослабити текст і сильніше тримати reference
-- піднімайте `balance` до `0.75`, якщо текст має агресивніше перезаписувати reference
+### Mask Ref Controller
 
-#### 4. Зберегти загальний look, але послабити дрібну деталізацію reference
+Маска для захисту, послаблення або заміни областей reference latent.
 
-Використання:
-```text
-model + conditioning -> TUZ FLUX.2 Klein Ref Latent Controller
+**Коли потрібен:** Потрібна різна сила reference у різних частинах зображення.
+
+| Параметр | Що робить |
+|---|---|
+| `mask_action` | `scale` (послабити) або `mix` (замінити іншим сигналом) |
+| `replace_mode` | Для `mix`: `zeros`, `gaussian_noise`, `channel_mean`, `lowpass_reference` |
+| `feather` | Пом'якшити краї маски |
+
+**Стартові значення:** `mask_action=scale`, `strength=0.8`, `feather=12`
+
+### Color Anchor
+
+Тримає кольори reference ближче до джерела під час семплінгу.
+
+**Коли потрібен:** Кольори результату пливуть занадто далеко від reference.
+
+| Параметр | Що робить |
+|---|---|
+| `strength` | Інтенсивність корекції (0.25–0.50 хороший старт) |
+| `ramp_curve` | Як швидко наростає корекція (більше = пізніший старт) |
+| `channel_weights` | `uniform` або `by_variance` (більше довіряє стабільним каналам) |
+| `ref_index` | `-1` для усереднення кольору з усіх reference |
+
+---
+
+## TUZ Klein Edit Composite
+
+Postprocess-нода для злиття згенерованого edit назад на оригінальне зображення. Стоїть **після VAE Decode**, не всередині LoRA pipeline.
+
+```
+оригінал + generated edit → VAE Decode → TUZ Klein Edit Composite → save
 ```
 
-Стартові значення:
-- `appearance_scale=1.10` до `1.25`
-- `detail_scale=0.60` до `0.85`
-- `blur_radius=2` або `3`
+**Потрібно:** `pip install opencv-python-headless`
 
-Практичний ефект:
-- краще зберігається coarse appearance і великий колірний/формовий сигнал
-- fine-detail lock стає слабшим
-- корисно, коли reference занадто жорстко тримає тканини, texture шкіри або дрібні аксесуари
+<details>
+<summary><b>Повний довідник полів (натисніть, щоб розгорнути)</b></summary>
 
-#### 5. Зменшити color drift ближче до кінця семплінгу
-
-Використання:
-```text
-model -> TUZ FLUX.2 Klein Color Anchor -> sampler
-```
-
-Стартові значення:
-- `strength=0.25` до `0.50`
-- `ramp_curve=1.5`
-- `channel_weights=uniform`
-
-Коли брати `channel_weights=by_variance`:
-- якщо частина каналів явно шумніша за інші
-- якщо потрібен м’якший color anchor без надмірної корекції
-
-Коли брати `ref_index=-1`:
-- якщо палітру формують одразу кілька reference
-- якщо потрібен усереднений color anchor, а не один домінуючий source
-
-#### 6. Практичне правило для multi-reference
-
-Якщо один reference є основним для identity, а інший лише style/support:
-- спершу таргетіть primary ref через `reference_index` / `target_reference_index`
-- не вмикайте `-1`, доки точно не хочете симетричну поведінку для всіх reference
-
-Якщо всі reference справді мають працювати разом:
-- `-1` найчистіший режим
-- використовуйте нижчі strength, ніж у single-reference workflow, бо сумарний conditioning уже сильніший
-
-### TUZ Klein Edit Composite
-
-Postprocess-нода для акуратного повернення згенерованого edit-результату на original image. Вона має стояти після decode, а не всередині LoRA pipeline.
-
-Рекомендований flow:
-```text
-original image + edit generation -> VAE Decode -> TUZ Klein Edit Composite -> save
-```
-
-Потрібна залежність:
-```bash
-pip install opencv-python-headless
-```
-
-Поля ноди:
-
-| Поле | Тип | Що означає |
+| Поле | Тип | Що робить |
 |---|---|---|
-| `generated_image` | IMAGE | Змінене / згенероване зображення, яке треба накласти назад. |
-| `original_image` | IMAGE | Чисте джерело, на яке композититься результат. |
-| `delta_e_threshold` | FLOAT | Чутливість до змін. `-1` вмикає auto-threshold. |
-| `flow_quality` | choice | Якість optical flow: `medium`, `fast`, `ultrafast`. |
-| `use_occlusion` | BOOLEAN | Додає consistency перевірку flow у маску. |
-| `occlusion_threshold` | FLOAT | Чутливість до occlusion. `-1` вмикає auto-threshold. |
-| `noise_removal_pct` | FLOAT | Прибирає шум/крапки з маски як % діагоналі зображення. |
-| `close_radius_pct` | FLOAT | Radius для morphological close як % діагоналі. |
-| `fill_holes` | BOOLEAN | Заповнює внутрішні дірки в масці. |
-| `fill_borders` | BOOLEAN | Розтягує маску в порожні warped-border області. |
-| `max_islands` | INT | Залишає тільки найбільші N connected regions. `0` вимикає. |
-| `grow_mask_pct` | FLOAT | Збільшує або зменшує маску як % діагоналі. |
-| `feather_pct` | FLOAT | Пом’якшує край фінального blend як % діагоналі. |
-| `color_match_blend` | FLOAT | Підтягує кольори generated до original background. |
-| `poisson_blend_edges` | BOOLEAN | Використовує Poisson/seamless blending для країв. |
-| `custom_mask` | MASK | Додаткова маска для replace/add/subtract режимів. |
-| `custom_mask_mode` | choice | Як комбінувати external mask: `replace`, `add`, `subtract`. |
-| `enable_debug` | BOOLEAN | Показує debug gallery і детальніший report. |
+| `generated_image` | IMAGE | Змінене зображення для композиту |
+| `original_image` | IMAGE | Чисте джерело |
+| `delta_e_threshold` | FLOAT | Чутливість до змін (-1 = авто) |
+| `flow_quality` | choice | `medium`, `fast`, `ultrafast` |
+| `use_occlusion` | BOOLEAN | Consistency перевірка flow |
+| `occlusion_threshold` | FLOAT | Чутливість occlusion (-1 = авто) |
+| `noise_removal_pct` | FLOAT | Прибрати шум з маски (% діагоналі) |
+| `close_radius_pct` | FLOAT | Morphological close (% діагоналі) |
+| `fill_holes` | BOOLEAN | Заповнити дірки в масці |
+| `fill_borders` | BOOLEAN | Розтягти маску в warped-border |
+| `max_islands` | INT | Тільки N найбільших regions (0 = всі) |
+| `grow_mask_pct` | FLOAT | Збільшити/зменшити маску (% діагоналі) |
+| `feather_pct` | FLOAT | Пом'якшити край blend (% діагоналі) |
+| `color_match_blend` | FLOAT | Підтягти кольори до original |
+| `poisson_blend_edges` | BOOLEAN | Seamless blending країв |
+| `custom_mask` | MASK | Зовнішня маска (optional) |
+| `custom_mask_mode` | choice | `replace`, `add`, `subtract` |
+| `enable_debug` | BOOLEAN | Debug gallery + детальний report |
 
-Найкраще підходить для:
-- локальних правок одягу та аксесуарів
-- touchup обличчя
-- контрольованої заміни об'єктів
-- прибирання drift на фоні після генерації
+</details>
 
-## Пресети редагування
+---
 
-Краще думати про `edit_mode` як про **рівень захисту**, а не як про “тип LoRA”. Різні edit LoRA на Klein можуть поводитися дуже по-різному:
+## Практичні рецепти
 
-- одні здебільшого міняють одяг, аксесуари або макіяж
-- інші сильно штовхають позу, пропорції тіла або композицію
-- частина є стилістичними LoRA, які люди просто використовують у режимі edit
-- частина є consistency / enhancer LoRA і нормально працюють майже без захисту
-
-При використанні LoRA для редагування зображень (наприклад, зміна одягу на фото) LoRA може пошкодити частини зображення, які ви хочете зберегти — найчастіше обличчя та ідентичність. Це відбувається тому, що FLUX.2 Klein обробляє зображення та текст по-різному на різних шарах:
-
-- **Double blocks (0-7):** Потоки зображення та тексту ізольовані — вони не можуть самі по собі спричинити текст-керовану корупцію.
-- **Single blocks (0-23):** Спільна крос-модальна обробка — саме тут текстовий промпт перезаписує reference зображення. Пізні single blocks (12-23) найагресивніші.
-
-### Доступні пресети
-
-| Пресет | Що робить | Коли використовувати |
-|---|---|---|
-| **None** | Стандартна LoRA (всі шари рівні) | Поведінка за замовчуванням |
-| **Preserve Face** | Послаблює пізні single blocks | Редагування зі збереженням обличчя |
-| **Preserve Body** | Агресивно послаблює середні+пізні single blocks | Збереження обличчя + пропорцій тіла |
-| **Style Only** | Знижує img потік у double blocks | Зміна стилю без структурних змін |
-| **Edit Subject** | Помірний захист пізніх блоків, легке підсилення txt | Зміна одягу/об'єктів зі збереженням ідентичності |
-| **Boost Prompt** | Підсилює txt потік і середні single blocks | Коли промпт недостатньо виконується |
-| **Auto** | Аналізує ваги LoRA, автоматично обирає пресет + balance | Без налаштувань — рекомендовано для більшості |
-
-### З Чого Почати Для Різних LoRA
-
-| Якщо ваша LoRA більше схожа на... | Початковий режим | Чому |
-|---|---|---|
-| Редагування одягу / аксесуарів / волосся / макіяжу | **Auto** або **Preserve Face** | Зазвичай краще тримає ідентичність, але дає локальні зміни |
-| Заміна одягу / try-on / body-sensitive edit | **Auto** або **Preserve Body** | Кращий старт, коли пливуть лице, силует або пропорції |
-| Стиль / aesthetic / painterly | **Auto** або **Style Only** | Дозволяє міняти вигляд, але менше ламає структуру |
-| Consistency / enhancer / “fixer” LoRA | **None** або **Auto** | Такі LoRA часто й так поводяться акуратно |
-| LoRA занадто слабо слухається промпта | **Boost Prompt** | Дає текстовим змінам більше ваги |
-| Ви навмисно хочете дати LoRA вільно міняти лице/тіло | **None** | “Сира” LoRA без додаткового захисту |
-
-### Use Case: Edit vs Generate
-
-`use_case` впливає лише на **Auto**. Ручні режими завжди працюють рівно так, як ви їх вибрали.
-
-- **Edit**: Найкраще для reference-driven редагування. Auto поводиться обережніше й сильніше береже ідентичність та структуру.
-- **Generate**: Найкраще для text-to-image, вільного restyle або коли немає сильного reference, який треба берегти. Auto дає LoRA більше свободи.
-
-Це важливо, бо edit LoRA для Klein не однакові. Style LoRA, clothing edit LoRA і consistency LoRA можуть бути однаково валідними, але їм потрібні різні стартові припущення.
-
-### Auto режим
-
-Коли `edit_mode` встановлено в **Auto**, нода аналізує розподіл ваг кожної LoRA і обирає оптимальний пресет:
-
-- Високий тренувальний сигнал у пізніх single blocks (editing LoRA) → **Preserve Body**
-- Помірний сигнал → **Preserve Face**
-- Рівномірний розподіл (слайдери, enhancer-и) → **None**
-
-Auto — сильний стартовий режим, але він все одно не читає ваш намір. Якщо ви спеціально хочете сильніше міняти позу, лице або тіло, переходьте на **None** або піднімайте `balance` ближче до `1.0`.
-
-Balance також обчислюється автоматично. В консолі видно який пресет було обрано:
-```
-[FLUX LoRA Multi slot 1] Auto → Preserve Body (balance=0.25)
-[FLUX LoRA Multi slot 2] Auto → Preserve Face (balance=0.40)
-```
-
-### Повзунок Balance
-
-Повзунок `balance` інтерполює між пресетом та стандартною поведінкою:
-- **0.0** — повний ефект пресету (максимальний захист)
-- **0.5** — середина між пресетом і стандартом
-- **1.0** — стандартна LoRA (пресет не діє)
-
-Практичне правило:
-- Зменшуйте `balance`, якщо LoRA продовжує перезаписувати обличчя, тіло або структуру reference.
-- Збільшуйте `balance`, якщо редагування відчувається занадто слабким або “занадто обережним”.
-
-## Як працює Auto Strength
-
-Для кожної пари шарів у файлі:
+### Рецепт 1: Базова зміна одягу зі збереженням обличчя
 
 ```
-ΔW = lora_B @ lora_A
-scaled_norm = frobenius_norm(ΔW) * (alpha / rank)
-strength = clamp(global * (mean_norm / layer_norm), floor=0.30, ceiling=1.50)
+LoRA Loader: edit_mode=Preserve Face, strength=0.7, balance=0.3
 ```
 
-Double blocks обробляються з img та txt потоками незалежно. Середній шар потрапляє на `global_strength`.
+### Рецепт 2: Стилізація без структурних пошкоджень
 
-## Підтримувані формати LoRA
+```
+LoRA Loader: edit_mode=Style Only, strength=0.5, balance=0.5
+```
+
+### Рецепт 3: Multi-LoRA з фіксацією ідентичності
+
+```
+Слот 1: clothing LoRA  → edit_mode=Preserve Body, strength=0.7
+Слот 2: enhancer       → edit_mode=None, strength=0.3
++ Text/Ref Balance: balance=0.6 (трохи підсилити prompt)
++ Color Anchor: strength=0.3 (запобігти color shift)
+```
+
+### Рецепт 4: Prompt занадто слабкий
+
+```
+LoRA Loader: edit_mode=Boost Prompt, strength=0.8, balance=0.4
+```
+
+### Рецепт 5: Зберегти look, але дати edit "дихати"
+
+```
+LoRA Loader: edit_mode=Auto
++ Ref Latent Controller: appearance_scale=1.15, detail_scale=0.7
+```
+
+---
+
+## Як це працює всередині
+
+<details>
+<summary><b>Конвертація форматів (натисніть, щоб розгорнути)</b></summary>
 
 | Формат | Джерело | Приклад ключів | Обробка |
 |---|---|---|---|
@@ -443,7 +372,55 @@ Double blocks обробляються з img та txt потоками неза
 
 Всі формати автовизначаються коли `auto_convert` увімкнено.
 
-## Архітектура FLUX.2 Klein 9B
+**Суть проблеми:**
+LoRA поставляються з окремими `to_q` / `to_k` / `to_v` проєкціями. FLUX зберігає їх як єдину fused QKV матрицю. Без конвертації більшість attention ваг просто не потрапляють у модель.
+
+**Математика (block-diagonal fusion):**
+Для fused ваги `W = [W_q; W_k; W_v]` та окремих LoRA `B_i @ A_i`:
+
+```
+A_fused = cat([A_q, A_k, A_v], dim=0)         [3r × in]
+B_fused = block_diag(B_q, B_k, B_v)           [3·out × 3r]
+```
+
+Alpha/rank scaling вбудовано в B_fused.
+
+</details>
+
+<details>
+<summary><b>Як працює auto-strength (натисніть, щоб розгорнути)</b></summary>
+
+Для кожної пари шарів у файлі:
+
+```
+ΔW = lora_B @ lora_A
+scaled_norm = frobenius_norm(ΔW) × (alpha / rank)
+strength = clamp(global × (mean_norm / layer_norm), floor=0.30, ceiling=1.50)
+```
+
+Double blocks обробляються з img та txt потоками незалежно. Середній шар потрапляє на `global_strength`.
+
+</details>
+
+<details>
+<summary><b>Чому Auto обирає саме такий пресет (натисніть, щоб розгорнути)</b></summary>
+
+Auto аналізує розподіл ваг LoRA по шарах архітектури:
+
+- **Високий сигнал у пізніх single blocks** (editing LoRA) → **Preserve Body**
+- **Помірний сигнал** → **Preserve Face**
+- **Рівномірний** (enhancer-и, слайдери) → **None**
+
+Balance теж обчислюється автоматично. В консолі видно рішення:
+```
+[FLUX LoRA Multi slot 1] Auto → Preserve Body (balance=0.25)
+[FLUX LoRA Multi slot 2] Auto → Preserve Face (balance=0.40)
+```
+
+</details>
+
+<details>
+<summary><b>Архітектура FLUX.2 Klein 9B (натисніть, щоб розгорнути)</b></summary>
 
 ```
 Double blocks (8 шарів)
@@ -464,6 +441,35 @@ Single blocks (24 шари)
 
 dim=4096  double_blocks=8  single_blocks=24
 ```
+
+- **Double blocks (0-7):** Потоки image та text ізольовані — крос-модальна корупція неможлива.
+- **Single blocks (0-23):** Спільна обробка — текстовий prompt може перезаписати reference. Пізні single blocks (12-23) найагресивніші.
+
+</details>
+
+---
+
+## FAQ
+
+**Q: Чи потрібен цей пакет для FLUX.1?**
+A: Працює і з FLUX.1, але основна цінність — для Klein 9B, де невідповідність архітектури найчастіша.
+
+**Q: Що означає `None` в edit_mode?**
+A: "Raw / No Protection" — не "нічого не обрано". LoRA працює з усіма шарами на рівній силі.
+
+**Q: Моя LoRA ніби не має ефекту.**
+A: Перевірте що `auto_convert` увімкнено. З GGUF-моделлю переконайтеся, що [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) встановлено.
+
+**Q: Auto режим обирає неправильний пресет.**
+A: Auto не читає ваш намір. Переключіться на ручний: `Preserve Face` для identity-роботи, `None` для повної свободи. Підлаштовуйте `balance`.
+
+**Q: Як дізнатися який пресет обрав Auto?**
+A: Дивіться консоль ComfyUI. Там логується: `Auto → Preserve Body (balance=0.25)`.
+
+**Q: Чи можна conditioning ноди без LoRA loader?**
+A: Так. Це незалежні ноди на `MODEL` та `CONDITIONING` — корисні у будь-якому FLUX workflow.
+
+---
 
 ## Подяки
 
