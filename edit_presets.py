@@ -62,7 +62,7 @@ EDIT_PRESETS = {
         # Protects face, body proportions (breast size, waist, figure).
         # Double blocks: keep img stream strong, reduce txt more.
         # Single blocks: dampened from sb4 onward (wider protection than Preserve Face).
-        # Trade-off: LoRA editing effect will be weaker — use higher balance if needed.
+        # Trade-off: LoRA editing effect will be weaker — use higher protection if needed.
         "db": {
             "0": {"img": 1.0, "txt": 0.85}, "1": {"img": 1.0, "txt": 0.85},
             "2": {"img": 1.0, "txt": 0.85}, "3": {"img": 1.0, "txt": 0.85},
@@ -154,14 +154,14 @@ def build_graph_presets():
     return graph_presets
 
 
-def interpolate_preset(preset_cfg, balance):
+def interpolate_preset(preset_cfg, protection):
     """
     Interpolate between a preset and neutral (all 1.0).
 
-    balance = 0.0  →  full preset (maximum protection/effect)
-    balance = 1.0  →  all weights = 1.0 (standard LoRA, no edit-mode effect)
+    protection = 0.0  →  raw LoRA / no edit-mode effect
+    protection = 1.0  →  full preset (maximum protection)
 
-    Formula:  final = preset_value + (1.0 - preset_value) * balance
+    Formula:  final = 1.0 - (1.0 - preset_value) * protection
     """
     if preset_cfg is None:
         return {}
@@ -170,12 +170,12 @@ def interpolate_preset(preset_cfg, balance):
 
     for idx, cfg in preset_cfg["db"].items():
         result["db"][idx] = {
-            "img": cfg["img"] + (1.0 - cfg["img"]) * balance,
-            "txt": cfg["txt"] + (1.0 - cfg["txt"]) * balance,
+            "img": 1.0 - (1.0 - cfg["img"]) * protection,
+            "txt": 1.0 - (1.0 - cfg["txt"]) * protection,
         }
 
     for idx, val in preset_cfg["sb"].items():
-        result["sb"][idx] = val + (1.0 - val) * balance
+        result["sb"][idx] = 1.0 - (1.0 - val) * protection
 
     return result
 
@@ -222,7 +222,7 @@ def merge_preset_over(base_cfg, preset_cfg):
 def auto_select_preset(analysis, use_case="Edit"):
     """
     Analyze ΔW norms from lora_meta.analyse_for_node() and pick the best
-    preset + balance automatically.
+    preset + protection automatically.
 
     Decision logic depends on the intended workflow:
       Edit:
@@ -239,10 +239,10 @@ def auto_select_preset(analysis, use_case="Edit"):
         - full-coverage / uniform LoRA                 → None
         - otherwise                                    → None
 
-    Balance is computed from max/mean ratio:
-      - Higher concentration = lower balance (more protection needed)
+    Protection is computed from max/mean ratio:
+      - Higher concentration = higher protection
 
-    Returns: (preset_name: str, balance: float)
+    Returns: (preset_name: str, protection: float)
     """
     def mean_or_zero(values):
         return (sum(values) / len(values)) if values else 0.0
@@ -281,11 +281,11 @@ def auto_select_preset(analysis, use_case="Edit"):
         use_case = "Edit"
 
     if not all_norms:
-        return ("Preserve Face", 0.40)
+        return ("Preserve Face", 0.60)
 
     mean_all = sum(all_norms) / len(all_norms)
     if mean_all < 1e-8:
-        return ("Preserve Face", 0.40)
+        return ("Preserve Face", 0.60)
 
     max_all = max(all_norms)
     late_mean = mean_or_zero(sb_late)
@@ -325,24 +325,25 @@ def auto_select_preset(analysis, use_case="Edit"):
         else:
             preset = "Preserve Face"
 
-    # Pick balance: higher concentration → lower balance (more protection)
-    # max_ratio 1.0–1.2 → balance ~0.55 (mild)
-    # max_ratio 1.5–2.0 → balance ~0.25 (strong protection)
-    balance = max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))
+    # Pick protection from concentration: stronger profile concentration → higher protection.
+    # max_ratio 1.0–1.2 → protection ~0.45 (mild)
+    # max_ratio 1.5–2.0 → protection ~0.75 (strong protection)
+    raw_mix = max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))
     if use_case == "Generate" and preset == "None":
-        balance = max(balance, 0.50)
+        raw_mix = max(raw_mix, 0.50)
     elif preset == "None":
-        balance = max(balance, 0.55)
+        raw_mix = max(raw_mix, 0.55)
     elif preset == "Style Only":
-        balance = max(balance, 0.35)
-    balance = round(balance / 0.05) * 0.05  # snap to 0.05 grid
+        raw_mix = max(raw_mix, 0.35)
+    raw_mix = round(raw_mix / 0.05) * 0.05  # snap to 0.05 grid
+    protection = round(1.0 - raw_mix, 2)
 
-    return (preset, balance)
+    return (preset, protection)
 
 
 def resolve_preset_selection(edit_mode, balance, analysis=None, use_case="Edit"):
     """
-    Resolve a user-facing edit_mode into the preset name + balance to apply.
+    Resolve a user-facing edit_mode into the preset name + protection to apply.
 
     Manual modes ignore use_case; only Auto is use-case aware.
     """

@@ -715,7 +715,7 @@ app.registerExtension({
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px sans-serif";
                 ctx.fillText(slot.use_case, card.x + 16, metaY);
-                ctx.fillText(`Bal ${slot.balance.toFixed(2)}`, card.x + 74, metaY);
+                ctx.fillText(`Prot ${slot.balance.toFixed(2)}`, card.x + 74, metaY);
 
                 return {
                     card,
@@ -771,7 +771,7 @@ app.registerExtension({
                 const balanceLabelY = card.y + 102;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px sans-serif";
-                ctx.fillText("Balance", innerX, balanceLabelY);
+                ctx.fillText("Protection", innerX, balanceLabelY);
                 ctx.textAlign = "right";
                 ctx.fillText(slot.balance.toFixed(2), innerX + innerW, balanceLabelY);
                 ctx.textAlign = "left";

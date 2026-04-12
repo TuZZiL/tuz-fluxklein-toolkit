@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import lora_meta
-from edit_presets import auto_select_preset, resolve_preset_selection
+from edit_presets import auto_select_preset, interpolate_preset, resolve_preset_selection
 from lora_compat import build_compatibility_report, build_key_map, normalize_lora_key, parse_lora_key
 
 
@@ -159,7 +159,23 @@ class LoraCompatTests(unittest.TestCase):
     def test_auto_select_preset_prefers_preserve_face_for_uniform_full_coverage(self):
         preset, balance = auto_select_preset(self.make_analysis(), use_case="Edit")
         self.assertEqual(preset, "Preserve Face")
-        self.assertGreaterEqual(balance, 0.2)
+        self.assertGreaterEqual(balance, 0.5)
+
+    def test_interpolate_preset_uses_intuitive_protection_scale(self):
+        preset_cfg = {
+            "db": {0: {"img": 0.4, "txt": 0.7}},
+            "sb": {0: 0.25},
+        }
+
+        raw = interpolate_preset(preset_cfg, 0.0)
+        protected = interpolate_preset(preset_cfg, 1.0)
+
+        self.assertEqual(raw["db"][0]["img"], 1.0)
+        self.assertEqual(raw["db"][0]["txt"], 1.0)
+        self.assertEqual(raw["sb"][0], 1.0)
+        self.assertEqual(protected["db"][0]["img"], 0.4)
+        self.assertEqual(protected["db"][0]["txt"], 0.7)
+        self.assertEqual(protected["sb"][0], 0.25)
 
     def test_auto_select_preset_picks_style_only_for_image_heavy_profile(self):
         sb = [0.92] * 24
@@ -190,7 +206,7 @@ class LoraCompatTests(unittest.TestCase):
         }
         preset, balance = auto_select_preset(analysis, use_case="Edit")
         self.assertEqual(preset, "None")
-        self.assertGreaterEqual(balance, 0.55)
+        self.assertLessEqual(balance, 0.45)
 
     def test_auto_select_preset_generate_prefers_none_for_uniform_full_coverage(self):
         preset, balance = auto_select_preset(self.make_analysis(), use_case="Generate")

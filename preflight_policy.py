@@ -132,12 +132,12 @@ def classify_profile(summary):
     return tags
 
 
-def recommend_edit_mode_balance(analysis, use_case="Edit"):
+def recommend_edit_mode_protection(analysis, use_case="Edit"):
     use_case = use_case if use_case in ("Edit", "Generate") else "Edit"
-    preset, balance = auto_select_preset(analysis or {}, use_case=use_case)
+    preset, protection = auto_select_preset(analysis or {}, use_case=use_case)
     if preset == "None":
-        balance = 1.0
-    return preset, round(float(balance), 2)
+        protection = 0.0
+    return preset, round(float(protection), 2)
 
 
 def recommend_strength(summary, compat, edit_mode, use_case="Edit"):
@@ -240,7 +240,7 @@ def build_single_advice(analysis, compat_report, use_case="Edit", source_name=No
     summary = summarize_analysis(analysis)
     compat = _compat_summary(compat_report)
     tags = classify_profile(summary)
-    edit_mode, balance = recommend_edit_mode_balance(analysis, use_case=use_case)
+    edit_mode, balance = recommend_edit_mode_protection(analysis, use_case=use_case)
     strength = recommend_strength(summary, compat, edit_mode, use_case=use_case)
     risk_level = _risk_level(summary, compat)
     warnings = _single_warnings(summary, compat, risk_level)
@@ -261,7 +261,7 @@ def build_single_advice(analysis, compat_report, use_case="Edit", source_name=No
         lines.append(f"Alpha: {summary['alpha']}")
     lines.append("Recommendation:")
     lines.append(f"  edit_mode: {edit_mode}")
-    lines.append(f"  balance: {balance:.2f}")
+    lines.append(f"  protection: {balance:.2f}")
     lines.append(f"  strength: {strength:.2f}")
     if warnings:
         lines.append("Warnings:")
@@ -386,7 +386,7 @@ def build_multi_advice(entries, use_case="Edit", source_name=None):
         lines.append(
             f"  - Slot {entry['index'] + 1}: {label} -> "
             f"{advice.get('recommended_edit_mode', 'None')} / "
-            f"balance {advice.get('recommended_balance', 1.0):.2f} / "
+            f"protection {advice.get('recommended_balance', 1.0):.2f} / "
             f"strength {advice.get('recommended_strength', slot.get('strength', 1.0)):.2f}"
         )
 

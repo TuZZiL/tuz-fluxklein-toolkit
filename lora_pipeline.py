@@ -348,19 +348,19 @@ def resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA", use
             edit_mode, balance, analysis=analysis, use_case=use_case
         )
         if auto_preset == "None":
-            logger.info(f"[{node_label}] Auto({use_case}) -> None (LoRA can run without extra protection)")
+            logger.info(f"[{node_label}] Auto({use_case}) -> None (raw LoRA is enough)")
             return None
         preset_raw = EDIT_PRESETS.get(auto_preset)
         if preset_raw is not None:
             cfg = interpolate_preset(preset_raw, auto_balance)
-            logger.info(f"[{node_label}] Auto({use_case}) -> {auto_preset} (balance={auto_balance:.2f})")
+            logger.info(f"[{node_label}] Auto({use_case}) -> {auto_preset} (protection={auto_balance:.2f})")
             return cfg
         return None
     preset_name, resolved_balance = resolve_preset_selection(edit_mode, balance, use_case=use_case)
     preset_raw = EDIT_PRESETS.get(preset_name)
     if preset_raw is not None:
         cfg = interpolate_preset(preset_raw, resolved_balance)
-        logger.info(f"[{node_label}] Edit mode '{preset_name}' applied (balance={resolved_balance:.2f})")
+        logger.info(f"[{node_label}] Edit mode '{preset_name}' applied (protection={resolved_balance:.2f})")
         return cfg
     return None
 

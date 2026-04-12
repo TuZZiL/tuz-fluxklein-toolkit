@@ -97,19 +97,18 @@ Think of `edit_mode` as a **protection dial**, not a category label:
 | **Boost Prompt** | Nothing (strengthens text instead) | When prompt feels too weak |
 | **None** | Nothing | Raw LoRA behavior, full freedom |
 
-### The `balance` slider
+### The protection dial (`balance`)
 
-Interpolates between preset protection and raw LoRA:
+Acts like a protection dial: `0.0` is raw LoRA, `1.0` is full preset protection.
 
 ```
 0.0 ◄━━━━━━━━━━━━━━━━━━━━━► 1.0
-Full preset effect          Raw LoRA (no protection)
-(maximum protection)        
+Raw LoRA (no protection)    Full preset protection
 ```
 
 **Rule of thumb:**
-- Face keeps getting overwritten? → Lower `balance` toward 0.0
-- Edit feels too weak or "too safe"? → Raise `balance` toward 1.0
+- Face keeps getting overwritten? → Raise `balance` toward 1.0
+- Edit feels too weak or "too safe"? → Lower `balance` toward 0.0
 
 ### Edit vs Generate (`use_case`)
 
@@ -137,7 +136,7 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 | `auto_convert` | boolean | Convert diffusers-format LoRAs to native FLUX format |
 | `auto_strength` | boolean | Auto-compute per-layer strengths from ΔW analysis |
 | `edit_mode` | dropdown | Protection level — `Auto` is the recommended start |
-| `balance` | float | 0.0 = full preset protection, 1.0 = raw LoRA |
+| `balance` | float | Protection dial: 0.0 = raw LoRA, 1.0 = full preset protection |
 
 **Graph widget:** 8 double-block columns (img purple / txt teal) + 24 single-block columns (green).
 - Drag to adjust individual layer strength
@@ -150,7 +149,7 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 
 Dynamic multi-LoRA loader with per-slot control. Click **"+ Add LoRA"** to add slots, **"✕"** to remove.
 
-Each slot has: Enabled toggle, LoRA dropdown, Strength, Use case, Edit mode, Balance.
+Each slot has: Enabled toggle, LoRA dropdown, Strength, Use case, Edit mode, Protection.
 
 | Input | Type | Description |
 |---|---|---|
@@ -177,7 +176,7 @@ Per-step LoRA strength control using ComfyUI's native Hook Keyframes. The LoRA e
 | `strength` | float | Base LoRA strength (0.0–2.0) |
 | `schedule` | dropdown | Strength curve profile |
 | `edit_mode` | dropdown | Protection level (supports Auto) |
-| `balance` | float | Preset effect ↔ raw LoRA |
+| `balance` | float | Raw LoRA ↔ preset protection |
 | `keyframes` | int | Number of keyframes (2–10) |
 
 **Returns:** `MODEL` + `CONDITIONING`
@@ -198,7 +197,7 @@ Analyzes a LoRA file + model compatibility and returns recommendations **without
 |---|---|---|
 | `report` | STRING | Human-readable summary with warnings |
 | `recommended_edit_mode` | STRING | Suggested preset |
-| `recommended_balance` | FLOAT | Suggested balance value |
+| `recommended_balance` | FLOAT | Suggested protection value |
 | `recommended_strength` | FLOAT | Safe starting strength |
 | `compat_status` | STRING | `ok`, `partial`, or `failed` |
 | `matched_modules` | INT | LoRA modules that matched the model |
@@ -326,7 +325,7 @@ original image + generated edit → VAE Decode → TUZ Klein Edit Composite → 
 ### Recipe 1: Basic clothing edit with face protection
 
 ```
-LoRA Loader: edit_mode=Preserve Face, strength=0.7, balance=0.3
+LoRA Loader: edit_mode=Preserve Face, strength=0.7, balance=0.7
 ```
 
 ### Recipe 2: Style transfer without structural damage
@@ -347,7 +346,7 @@ Slot 2: enhancer       → edit_mode=None, strength=0.3
 ### Recipe 4: Prompt feels too weak
 
 ```
-LoRA Loader: edit_mode=Boost Prompt, strength=0.8, balance=0.4
+LoRA Loader: edit_mode=Boost Prompt, strength=0.8, balance=0.6
 ```
 
 ### Recipe 5: Keep overall look but allow edits to "breathe"
@@ -411,10 +410,10 @@ Auto analyzes each LoRA's weight distribution across architecture layers:
 - **Moderate late-block signal** → **Preserve Face**
 - **Uniform distribution** (sliders, enhancers) → **None**
 
-The balance is also computed automatically. Console logs show the decision:
+Protection is also computed automatically. Console logs show the decision:
 ```
-[FLUX LoRA Multi slot 1] Auto → Preserve Body (balance=0.25)
-[FLUX LoRA Multi slot 2] Auto → Preserve Face (balance=0.40)
+[FLUX LoRA Multi slot 1] Auto → Preserve Body (protection=0.75)
+[FLUX LoRA Multi slot 2] Auto → Preserve Face (protection=0.60)
 ```
 
 </details>
@@ -461,10 +460,10 @@ A: "Raw / No Protection" — not "nothing selected". The LoRA runs with all laye
 A: Check `auto_convert` is ON. If using a GGUF model, ensure [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) is installed.
 
 **Q: Auto mode picks the wrong preset for my use case.**
-A: Auto can't read your intent. Switch to manual: `Preserve Face` for identity work, `None` for full freedom. Use `balance` to fine-tune.
+A: Auto can't read your intent. Switch to manual: `Preserve Face` for identity work, `None` for full freedom. Use the `balance` protection dial to fine-tune.
 
 **Q: How do I know which preset Auto picked?**
-A: Check the ComfyUI console. It logs e.g. `Auto → Preserve Body (balance=0.25)`.
+A: Check the ComfyUI console. It logs e.g. `Auto → Preserve Body (protection=0.75)`.
 
 **Q: Can I use the conditioning nodes without the LoRA loader?**
 A: Yes. They are independent nodes that work on `MODEL` and `CONDITIONING` — they're useful with any FLUX workflow.

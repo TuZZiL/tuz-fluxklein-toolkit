@@ -130,7 +130,7 @@ class FluxLoraLoader:
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
-                    "tooltip": "How much of the preset to keep. 0.0 = strongest preset effect, 1.0 = raw LoRA behavior with no extra protection/boost.",
+                    "tooltip": "How much preset protection to apply. 0.0 = raw LoRA behavior, 1.0 = full preset protection.",
                 }),
                 # Canonical graph button masks from edit_presets.py — hidden by JS
                 "graph_presets": ("STRING", {"default": json.dumps(build_graph_presets(), sort_keys=True)}),
@@ -391,7 +391,7 @@ class FluxLoraScheduled:
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
-                    "tooltip": "How strongly to apply the chosen mode. Lower = safer / more preserving. Higher = closer to raw LoRA.",
+                    "tooltip": "How much preset protection to apply. 0.0 = raw LoRA behavior, 1.0 = full preset protection.",
                 }),
                 "auto_convert": ("BOOLEAN", {
                     "default": True,
