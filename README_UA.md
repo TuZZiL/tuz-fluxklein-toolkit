@@ -152,12 +152,18 @@ FluxLoraScheduled → MODEL → CFGGuider
 
 | Нода | Що робить |
 |---|---|
-| `TUZ FLUX.2 Klein Ref Latent Controller` | Керує силою окремого reference image в attention path. |
-| `TUZ FLUX.2 Klein Text/Ref Balance` | Балансує текст і reference одним повзунком. |
-| `TUZ FLUX.2 Klein Mask Ref Controller` | Використовує маску, щоб захищати або відпускати області reference latent. |
-| `TUZ FLUX.2 Klein Color Anchor` | Тримає кольори reference ближче до джерела під час семплінгу. |
+| `TUZ FLUX.2 Klein Ref Latent Controller` | Керує силою одного або всіх reference image в attention path, з optional балансом appearance/detail перед патчингом. |
+| `TUZ FLUX.2 Klein Text/Ref Balance` | Балансує текст і reference одним повзунком, або через attention patch, або через прямий latent mix. |
+| `TUZ FLUX.2 Klein Mask Ref Controller` | Використовує маску, щоб захищати, послаблювати або частково замінювати області одного чи кількох reference latent. |
+| `TUZ FLUX.2 Klein Color Anchor` | Тримає кольори reference ближче до джерела під час семплінгу, з підтримкою усереднення кількох reference. |
 
 Ці ноди зроблені в простому ComfyUI-стилі: одна нода = одна задача, стандартні поля, без зайвої візуальної обгортки.
+
+Практичні оновлення в поточній версії:
+- **Multi-reference aware**: `reference_index` / `target_reference_index` можуть працювати з одним reference або з усіма (`-1`) залежно від ноди.
+- **Mask mix modes**: `TUZ FLUX.2 Klein Mask Ref Controller` тепер підтримує `mask_action=scale|mix`. У режимі `mix` masked області можна замінювати через `zeros`, `gaussian_noise`, `channel_mean` або `lowpass_reference`.
+- **Prompt/reference balance modes**: `TUZ FLUX.2 Klein Text/Ref Balance` зберігає старий `attn_patch` режим за замовчуванням і також підтримує `latent_mix` для прямого контролю reference latent.
+- **Appearance/detail rebalance**: `TUZ FLUX.2 Klein Ref Latent Controller` тепер може окремо підсилювати coarse appearance і послаблювати fine detail перед масштабуванням attention-path.
 
 ### TUZ Klein Edit Composite
 

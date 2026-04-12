@@ -152,12 +152,18 @@ These nodes control reference-latent behavior and prompt-conditioning without ch
 
 | Node | What it does |
 |---|---|
-| `TUZ FLUX.2 Klein Ref Latent Controller` | Scales one reference image inside the model attention path. |
-| `TUZ FLUX.2 Klein Text/Ref Balance` | Balances text vs reference influence with a single slider. |
-| `TUZ FLUX.2 Klein Mask Ref Controller` | Uses a mask to protect or free areas of the reference latent. |
-| `TUZ FLUX.2 Klein Color Anchor` | Keeps reference colors closer to the source during sampling. |
+| `TUZ FLUX.2 Klein Ref Latent Controller` | Scales one or all reference images inside the model attention path, with optional appearance/detail rebalancing before patching. |
+| `TUZ FLUX.2 Klein Text/Ref Balance` | Balances text vs reference influence with a single slider, either through attention-patch scaling or direct latent mixing. |
+| `TUZ FLUX.2 Klein Mask Ref Controller` | Uses a mask to protect, dampen, or partially replace areas of one or many reference latents. |
+| `TUZ FLUX.2 Klein Color Anchor` | Keeps reference colors closer to the source during sampling, with support for averaging multiple references. |
 
 These nodes are designed to be simple ComfyUI-style controls: one job per node, plain widgets, and no extra visual chrome.
+
+Practical upgrades in the current version:
+- **Multi-reference aware**: `reference_index` / `target_reference_index` can address one reference or all references (`-1`) depending on the node.
+- **Mask mix modes**: `TUZ FLUX.2 Klein Mask Ref Controller` now supports `mask_action=scale|mix`. `mix` can replace masked regions with `zeros`, `gaussian_noise`, `channel_mean`, or `lowpass_reference`.
+- **Prompt/reference balance modes**: `TUZ FLUX.2 Klein Text/Ref Balance` keeps the original `attn_patch` behavior by default and also supports `latent_mix` for direct reference-latent control.
+- **Appearance/detail rebalance**: `TUZ FLUX.2 Klein Ref Latent Controller` can optionally boost coarse appearance and dampen fine detail before attention-path scaling.
 
 ### TUZ Klein Edit Composite
 
