@@ -8,7 +8,39 @@ LoRA patches. They are intentionally small, composable, and ComfyUI-friendly.
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
+
+try:  # pragma: no cover - package vs direct import
+    from .conditioning_common import (
+        apply_preserve_blend,
+        clone_meta,
+        dampen_toward_neutral,
+        get_reference_latents,
+        reference_indices,
+        reference_token_spans,
+        set_reference_latents,
+    )
+    from .conditioning_reference import (
+        apply_mask_to_reference_latent as _apply_mask_to_reference_latent_impl,
+        apply_masked_reference_mix,
+        mix_reference_latent,
+        rebalance_reference_appearance,
+    )
+except ImportError:  # pragma: no cover
+    from conditioning_common import (
+        apply_preserve_blend,
+        clone_meta,
+        dampen_toward_neutral,
+        get_reference_latents,
+        reference_indices,
+        reference_token_spans,
+        set_reference_latents,
+    )
+    from conditioning_reference import (
+        apply_mask_to_reference_latent as _apply_mask_to_reference_latent_impl,
+        apply_masked_reference_mix,
+        mix_reference_latent,
+        rebalance_reference_appearance,
+    )
 
 
 def _iter_conditioning_meta(conditioning):
@@ -19,47 +51,25 @@ def _iter_conditioning_meta(conditioning):
 
 
 def _extract_reference_latents(meta):
-    ref_latents = meta.get("reference_latents", None)
-    if ref_latents:
-        return ref_latents
-
-    model_conds = meta.get("model_conds", {})
-    ref_latents = model_conds.get("ref_latents", None)
-    if ref_latents is None:
-        return None
-    if hasattr(ref_latents, "cond"):
-        return ref_latents.cond
-    return ref_latents
+    return get_reference_latents(meta)
 
 
 def _find_reference_latent(conditioning, reference_index=0):
     for _, meta in _iter_conditioning_meta(conditioning):
         ref_latents = _extract_reference_latents(meta)
-        if ref_latents is not None and reference_index < len(ref_latents):
-            return ref_latents[reference_index]
+        if not ref_latents:
+            continue
+        indices = reference_indices(len(ref_latents), reference_index)
+        if indices:
+            return ref_latents[indices[0]]
     return None
 
 
 def _reference_token_span(extra_options, reference_index):
-    ref_tokens = extra_options.get("reference_image_num_tokens", [])
-    if not ref_tokens or reference_index >= len(ref_tokens):
+    spans = reference_token_spans(extra_options, reference_index)
+    if not spans:
         return None
-
-    total_ref = sum(ref_tokens)
-    tok_start = sum(ref_tokens[:reference_index])
-    tok_end = tok_start + ref_tokens[reference_index]
-    seq_start = -total_ref + tok_start
-    seq_end = -total_ref + tok_end
-    seq_end_idx = None if seq_end == 0 else seq_end
-    return {
-        "total_ref": total_ref,
-        "tok_start": tok_start,
-        "tok_end": tok_end,
-        "seq_start": seq_start,
-        "seq_end": seq_end,
-        "seq_end_idx": seq_end_idx,
-        "num_ref_tokens": ref_tokens[reference_index],
-    }
+    return spans[0]
 
 
 def _spatial_fade_weights(num_tokens, ref_latent, mode, fade_strength, device):
@@ -100,51 +110,26 @@ def _spatial_fade_weights(num_tokens, ref_latent, mode, fade_strength, device):
     return weights
 
 
-def _resize_mask_to_latent(mask, lat_h, lat_w):
-    m = mask[0:1].unsqueeze(1).float()
-    return F.interpolate(m, size=(lat_h, lat_w), mode="bilinear", align_corners=False)
-
-
-def _feather_mask(mask, radius):
-    if radius <= 0:
-        return mask
-
-    kernel_size = radius * 2 + 1
-    sigma = radius / 3.0
-    axis = torch.arange(kernel_size, dtype=torch.float32, device=mask.device) - radius
-    gauss_1d = torch.exp(-0.5 * (axis / sigma) ** 2)
-    gauss_1d = gauss_1d / gauss_1d.sum()
-    kernel = gauss_1d.unsqueeze(0) * gauss_1d.unsqueeze(1)
-    kernel = kernel.unsqueeze(0).unsqueeze(0)
-    blurred = F.conv2d(mask, kernel, padding=radius)
-    return blurred.clamp(0.0, 1.0)
-
-
-def _apply_mask_to_reference_latent(ref_latent, mask, strength, invert_mask=False, feather=0, channel_mode="all"):
-    if ref_latent is None:
-        return None
-
-    ref = ref_latent.float().clone()
-    _, num_ch, lat_h, lat_w = ref.shape
-
-    spatial_mask = _resize_mask_to_latent(mask, lat_h, lat_w)
-    if invert_mask:
-        spatial_mask = 1.0 - spatial_mask
-    if feather > 0:
-        spatial_mask = _feather_mask(spatial_mask, feather)
-
-    multiplier = 1.0 - strength * (1.0 - spatial_mask)
-    if channel_mode == "low":
-        ch_start, ch_end = 0, num_ch // 2
-    elif channel_mode == "high":
-        ch_start, ch_end = num_ch // 2, num_ch
-    else:
-        ch_start, ch_end = 0, num_ch
-
-    modified = ref.clone()
-    expanded = multiplier.expand(-1, ch_end - ch_start, -1, -1).to(ref.device)
-    modified[:, ch_start:ch_end, :, :] = ref[:, ch_start:ch_end, :, :] * expanded
-    return modified
+def _apply_mask_to_reference_latent(
+    ref_latent,
+    mask,
+    strength,
+    invert_mask=False,
+    feather=0,
+    channel_mode="all",
+    channel_mask_start=0,
+    channel_mask_end=0,
+):
+    return _apply_mask_to_reference_latent_impl(
+        ref_latent,
+        mask,
+        strength=strength,
+        invert_mask=invert_mask,
+        feather=feather,
+        channel_mode=channel_mode,
+        channel_start=int(channel_mask_start) if channel_mask_end > channel_mask_start else None,
+        channel_end=int(channel_mask_end) if channel_mask_end > channel_mask_start else None,
+    )
 
 
 class Flux2KleinRefLatentController:
@@ -155,11 +140,16 @@ class Flux2KleinRefLatentController:
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
                 "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.05}),
-                "reference_index": ("INT", {"default": 0, "min": 0, "max": 7}),
+                "reference_index": ("INT", {"default": 0, "min": -1, "max": 63}),
             },
             "optional": {
                 "spatial_fade": (["none", "center_out", "edges_out", "top_down", "left_right"], {"default": "none"}),
                 "spatial_fade_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "appearance_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05}),
+                "detail_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05}),
+                "blur_radius": ("INT", {"default": 2, "min": 1, "max": 32, "step": 1}),
+                "channel_mask_start": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "channel_mask_end": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
@@ -168,9 +158,50 @@ class Flux2KleinRefLatentController:
     FUNCTION = "control"
     CATEGORY = "conditioning/flux2klein"
 
-    def control(self, model, conditioning, strength=1.0, reference_index=0, spatial_fade="none", spatial_fade_strength=0.5, debug=False):
+    def control(
+        self,
+        model,
+        conditioning,
+        strength=1.0,
+        reference_index=0,
+        spatial_fade="none",
+        spatial_fade_strength=0.5,
+        appearance_scale=1.0,
+        detail_scale=1.0,
+        blur_radius=2,
+        channel_mask_start=0,
+        channel_mask_end=0,
+        debug=False,
+    ):
         if strength == 0:
             return (model, conditioning)
+
+        updated_conditioning = []
+        rebalance_needed = appearance_scale != 1.0 or detail_scale != 1.0
+        for cond_tensor, meta in _iter_conditioning_meta(conditioning):
+            new_meta = clone_meta(meta)
+            refs = get_reference_latents(new_meta)
+            if refs and rebalance_needed:
+                indices = reference_indices(len(refs), reference_index)
+                if indices:
+                    new_refs = []
+                    for ref_idx, ref in enumerate(refs):
+                        if ref_idx in indices:
+                            new_refs.append(
+                                rebalance_reference_appearance(
+                                    ref,
+                                    appearance_scale=float(appearance_scale),
+                                    detail_scale=float(detail_scale),
+                                    blur_radius=int(blur_radius),
+                                    channel_start=int(channel_mask_start),
+                                    channel_end=int(channel_mask_end) if channel_mask_end > channel_mask_start else ref.shape[1],
+                                )
+                            )
+                        else:
+                            new_refs.append(ref.clone())
+                    new_meta = set_reference_latents(new_meta, new_refs)
+            updated_conditioning.append((cond_tensor, new_meta))
+        conditioning = updated_conditioning
 
         ref_latent = None
         if conditioning and spatial_fade != "none":
@@ -179,25 +210,26 @@ class Flux2KleinRefLatentController:
         current = model.clone()
 
         def ref_weight_patch(q, k, v, extra_options={}, **kwargs):
-            span = _reference_token_span(extra_options, reference_index)
-            if span is None:
+            spans = reference_token_spans(extra_options, reference_index)
+            if not spans:
                 return {}
-
-            if spatial_fade != "none" and ref_latent is not None:
-                token_w = _spatial_fade_weights(
-                    span["num_ref_tokens"], ref_latent, spatial_fade, spatial_fade_strength, k.device
-                )
-                if token_w is not None:
-                    scale = (strength * token_w).view(1, 1, -1, 1).to(k.dtype)
-                else:
-                    scale = strength
-            else:
-                scale = strength
 
             k = k.clone()
             v = v.clone()
-            k[:, :, span["seq_start"] : span["seq_end_idx"], :] *= scale
-            v[:, :, span["seq_start"] : span["seq_end_idx"], :] *= scale
+            for span in spans:
+                if spatial_fade != "none" and ref_latent is not None:
+                    token_w = _spatial_fade_weights(
+                        span["num_ref_tokens"], ref_latent, spatial_fade, spatial_fade_strength, k.device
+                    )
+                    if token_w is not None:
+                        scale = (strength * token_w).view(1, 1, -1, 1).to(k.dtype)
+                    else:
+                        scale = strength
+                else:
+                    scale = strength
+
+                k[:, :, span["seq_start"] : span["seq_end_idx"], :] *= scale
+                v[:, :, span["seq_start"] : span["seq_end_idx"], :] *= scale
 
             if debug:
                 block_idx = extra_options.get("block_index", "?")
@@ -221,6 +253,9 @@ class Flux2KleinTextRefBalance:
                 "balance": ("FLOAT", {"default": 0.500, "min": 0.000, "max": 1.000, "step": 0.001}),
             },
             "optional": {
+                "balance_mode": (["attn_patch", "latent_mix"], {"default": "attn_patch"}),
+                "target_reference_index": ("INT", {"default": -1, "min": -1, "max": 63, "step": 1}),
+                "replace_mode": (["zeros", "gaussian_noise", "channel_mean", "lowpass_reference"], {"default": "zeros"}),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
@@ -229,8 +264,9 @@ class Flux2KleinTextRefBalance:
     FUNCTION = "balance_streams"
     CATEGORY = "conditioning/flux2klein"
 
-    def balance_streams(self, model, conditioning, balance=0.5, debug=False):
+    def balance_streams(self, model, conditioning, balance=0.5, balance_mode="attn_patch", target_reference_index=-1, replace_mode="zeros", debug=False):
         current = model.clone()
+        updated_conditioning = []
 
         if balance <= 0.5:
             text_scale = balance * 2.0
@@ -239,11 +275,38 @@ class Flux2KleinTextRefBalance:
             text_scale = 1.0
             ref_scale = (1.0 - balance) * 2.0
 
+        if balance_mode == "latent_mix" and ref_scale != 1.0:
+            for cond_tensor, meta in _iter_conditioning_meta(conditioning):
+                new_meta = clone_meta(meta)
+                refs = get_reference_latents(new_meta)
+                if refs:
+                    indices = reference_indices(len(refs), target_reference_index)
+                    if indices:
+                        new_refs = []
+                        for ref_idx, ref in enumerate(refs):
+                            if ref_idx in indices:
+                                new_refs.append(
+                                    mix_reference_latent(
+                                        ref,
+                                        reference_keep=ref_scale,
+                                        replace_mode=replace_mode,
+                                        channel_start=0,
+                                        channel_end=ref.shape[1],
+                                        spatial_fade="none",
+                                        spatial_fade_strength=0.0,
+                                    )
+                                )
+                            else:
+                                new_refs.append(ref.clone())
+                        new_meta = set_reference_latents(new_meta, new_refs)
+                updated_conditioning.append((cond_tensor, new_meta))
+            conditioning = updated_conditioning
+
         def balance_patch(q, k, v, extra_options={}, **kwargs):
             img_slice = extra_options.get("img_slice", None)
-            ref_tokens = extra_options.get("reference_image_num_tokens", [])
+            ref_spans = reference_token_spans(extra_options, target_reference_index)
 
-            if img_slice is None and not ref_tokens:
+            if img_slice is None and not ref_spans:
                 return {}
 
             k = k.clone()
@@ -254,15 +317,15 @@ class Flux2KleinTextRefBalance:
                 k[:, :, :txt_end, :] *= text_scale
                 v[:, :, :txt_end, :] *= text_scale
 
-            if ref_tokens and ref_scale != 1.0:
-                total_ref = sum(ref_tokens)
-                k[:, :, -total_ref:, :] *= ref_scale
-                v[:, :, -total_ref:, :] *= ref_scale
+            if balance_mode == "attn_patch" and ref_spans and ref_scale != 1.0:
+                for span in ref_spans:
+                    k[:, :, span["seq_start"] : span["seq_end_idx"], :] *= ref_scale
+                    v[:, :, span["seq_start"] : span["seq_end_idx"], :] *= ref_scale
 
             if debug:
                 block_idx = extra_options.get("block_index", "?")
                 print(
-                    f"[TextRefBalance] block={block_idx} text_scale={text_scale:.3f} ref_scale={ref_scale:.3f}"
+                    f"[TextRefBalance] block={block_idx} mode={balance_mode} text_scale={text_scale:.3f} ref_scale={ref_scale:.3f}"
                 )
             return {"q": q, "k": k, "v": v}
 
@@ -283,6 +346,12 @@ class Flux2KleinMaskRefController:
                 "invert_mask": ("BOOLEAN", {"default": False}),
                 "feather": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
                 "channel_mode": (["all", "low", "high"], {"default": "all"}),
+                "channel_mask_start": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "channel_mask_end": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "mask_action": (["scale", "mix"], {"default": "scale"}),
+                "reference_keep": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "replace_mode": (["zeros", "gaussian_noise", "channel_mean", "lowpass_reference"], {"default": "zeros"}),
+                "target_reference_index": ("INT", {"default": 0, "min": -1, "max": 63, "step": 1}),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
@@ -291,7 +360,22 @@ class Flux2KleinMaskRefController:
     FUNCTION = "apply_mask"
     CATEGORY = "conditioning/flux2klein"
 
-    def apply_mask(self, conditioning, mask, strength=1.0, invert_mask=False, feather=0, channel_mode="all", debug=False):
+    def apply_mask(
+        self,
+        conditioning,
+        mask,
+        strength=1.0,
+        invert_mask=False,
+        feather=0,
+        channel_mode="all",
+        channel_mask_start=0,
+        channel_mask_end=0,
+        mask_action="scale",
+        reference_keep=0.5,
+        replace_mode="zeros",
+        target_reference_index=0,
+        debug=False,
+    ):
         if not conditioning or strength == 0.0:
             return (conditioning,)
 
@@ -301,35 +385,62 @@ class Flux2KleinMaskRefController:
             new_meta = meta.copy()
             ref_latents = _extract_reference_latents(meta)
 
-            if ref_latents is None or len(ref_latents) == 0:
+            if not ref_latents:
                 if debug:
                     print(f"[MaskRefController] Item {idx}: no reference_latents found")
                 output.append((cond_tensor, new_meta))
                 continue
 
-            ref = ref_latents[0]
-            modified = _apply_mask_to_reference_latent(
-                ref,
-                mask,
-                strength=strength,
-                invert_mask=invert_mask,
-                feather=feather,
-                channel_mode=channel_mode,
-            )
-
-            if modified is None:
+            indices = reference_indices(len(ref_latents), target_reference_index)
+            if not indices:
                 output.append((cond_tensor, new_meta))
                 continue
 
-            original_dtype = ref.dtype
-            new_meta["reference_latents"] = [modified.to(original_dtype)]
+            modified_refs = []
+            for ref_idx, ref in enumerate(ref_latents):
+                if ref_idx not in indices:
+                    modified_refs.append(ref.clone())
+                    continue
+
+                if mask_action == "mix":
+                    modified = apply_masked_reference_mix(
+                        ref,
+                        mask,
+                        strength=strength,
+                        reference_keep=float(reference_keep),
+                        replace_mode=replace_mode,
+                        invert_mask=invert_mask,
+                        feather=feather,
+                        channel_mode=channel_mode,
+                        channel_start=int(channel_mask_start) if channel_mask_end > channel_mask_start else None,
+                        channel_end=int(channel_mask_end) if channel_mask_end > channel_mask_start else None,
+                    )
+                else:
+                    modified = _apply_mask_to_reference_latent(
+                        ref,
+                        mask,
+                        strength=strength,
+                        invert_mask=invert_mask,
+                        feather=feather,
+                        channel_mode=channel_mode,
+                        channel_mask_start=channel_mask_start,
+                        channel_mask_end=channel_mask_end,
+                    )
+
+                if modified is None:
+                    modified_refs.append(ref.clone())
+                    continue
+
+                modified_refs.append(modified.to(ref.dtype))
+
+            new_meta["reference_latents"] = modified_refs
             output.append((cond_tensor, new_meta))
 
             if debug:
-                _, _, lat_h, lat_w = ref.shape
+                _, _, lat_h, lat_w = ref_latents[0].shape
                 print(
-                    f"[MaskRefController] Item {idx} ref={ref.shape} mask={tuple(mask.shape)} "
-                    f"latent={lat_h}x{lat_w} invert={invert_mask} feather={feather} channel_mode={channel_mode}"
+                    f"[MaskRefController] Item {idx} refs={len(ref_latents)} action={mask_action} "
+                    f"mask={tuple(mask.shape)} latent={lat_h}x{lat_w} invert={invert_mask} feather={feather} channel_mode={channel_mode}"
                 )
 
         return (output,)
@@ -346,7 +457,7 @@ class Flux2KleinColorAnchor:
             },
             "optional": {
                 "ramp_curve": ("FLOAT", {"default": 1.5, "min": 0.5, "max": 8.0, "step": 0.1}),
-                "ref_index": ("INT", {"default": 0, "min": 0, "max": 63}),
+                "ref_index": ("INT", {"default": 0, "min": -1, "max": 63}),
                 "channel_weights": (["uniform", "by_variance"], {"default": "uniform"}),
                 "debug": ("BOOLEAN", {"default": False}),
             },
@@ -360,7 +471,20 @@ class Flux2KleinColorAnchor:
         if strength == 0.0:
             return (model,)
 
-        ref_latent = _find_reference_latent(conditioning, ref_index)
+        ref_latent = None
+        for _, meta in _iter_conditioning_meta(conditioning):
+            refs = _extract_reference_latents(meta)
+            if not refs:
+                continue
+            indices = reference_indices(len(refs), ref_index)
+            if not indices:
+                continue
+            try:
+                selected = [refs[i].to(torch.float32) for i in indices]
+                ref_latent = torch.stack(selected, dim=0).mean(dim=0).to(dtype=refs[indices[0]].dtype)
+            except Exception:
+                ref_latent = refs[indices[0]]
+            break
         if ref_latent is None:
             if debug:
                 print("[ColorAnchor] No reference latent found in conditioning; node inactive.")
