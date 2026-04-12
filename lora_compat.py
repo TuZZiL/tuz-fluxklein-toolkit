@@ -34,6 +34,20 @@ def normalize_lora_keys(lora_sd):
     return {normalize_lora_key(key): val for key, val in lora_sd.items()}
 
 
+def build_key_map(model):
+    """Build lora_key_base -> model_state_dict_key mapping."""
+    key_map = {}
+    for model_key in model.model.state_dict().keys():
+        if not model_key.endswith(".weight"):
+            continue
+        base = model_key[: -len(".weight")]
+        bare = base[len("diffusion_model."):] if base.startswith("diffusion_model.") else base
+        for pfx in ("diffusion_model.", "transformer.", ""):
+            key_map[f"{pfx}{bare}"] = model_key
+        key_map["lora_unet_" + bare.replace(".", "_")] = model_key
+    return key_map
+
+
 def parse_lora_key(key: str):
     """
     Returns (base_key, role) where role is one of:

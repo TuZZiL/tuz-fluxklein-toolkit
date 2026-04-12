@@ -13,6 +13,11 @@ from typing import Optional, Tuple
 import numpy as np
 import torch
 
+try:  # pragma: no cover - package vs direct import
+    from .edit_composite_reporting import build_debug_gallery, build_report_lines
+except ImportError:  # pragma: no cover
+    from edit_composite_reporting import build_debug_gallery, build_report_lines
+
 try:
     import cv2
 except Exception:  # pragma: no cover
@@ -598,9 +603,123 @@ def _merge_custom_mask(base_mask: np.ndarray, custom_mask: Optional[np.ndarray],
     return base_mask
 
 
-def _composite(
+def _composite_with_custom_mask(
     original_np: np.ndarray,
     generated_np: np.ndarray,
+    *,
+    h: int,
+    w: int,
+    diag: float,
+    gray_orig: np.ndarray,
+    flow_preset: int,
+    occlusion_threshold: float,
+    feather_px: float,
+    color_match_blend: float,
+    use_occlusion: bool,
+    fill_borders: bool,
+    custom_mask: np.ndarray,
+    custom_mask_mode: str,
+    poisson_blend_edges: bool,
+    debug: bool,
+    debug_images,
+):
+    cv = _require_cv2()
+    auto_report = {}
+    gen_pre, _, inliers, valid, debug_sift = _detect_and_align(original_np, generated_np, orig_mask=None, debug=debug)
+    if debug:
+        debug_images["pass1_sift_matches"] = debug_sift.get("match_viz", np.zeros((h, w, 3), dtype=np.float32))
+        debug_images["pass1_validity_mask"] = valid.copy()
+
+    sharp_mask = np.clip(custom_mask, 0.0, 1.0) * valid
+    if fill_borders:
+        sharp_mask = _bleed_mask(sharp_mask, valid)
+
+    if feather_px > 0:
+        inv_mask = (sharp_mask < 0.5).astype(np.uint8)
+        if inv_mask.min() == 0:
+            dist = cv.distanceTransform(inv_mask, cv.DIST_L2, 5)
+            fade_dist = feather_px * 2.5
+            t = np.clip(1.0 - (dist / fade_dist), 0.0, 1.0)
+            composite_mask = (t * t * (3.0 - 2.0 * t)).astype(np.float32)
+        else:
+            composite_mask = sharp_mask
+    else:
+        composite_mask = sharp_mask
+
+    if not fill_borders:
+        composite_mask *= valid
+
+    gen_pre, color_matched = _apply_color_match(original_np, gen_pre, composite_mask, valid, color_match_blend)
+    if color_matched:
+        auto_report["color_match_applied"] = True
+
+    if poisson_blend_edges:
+        result = _seamless_blend(original_np, gen_pre, composite_mask)
+    else:
+        m3 = composite_mask[..., np.newaxis]
+        result = np.clip(original_np * (1.0 - m3) + gen_pre * m3, 0, 1)
+
+    flow_fwd_final = _dis_flow(
+        gray_orig,
+        cv.cvtColor((np.clip(gen_pre, 0, 1) * 255).astype(np.uint8), cv.COLOR_RGB2GRAY),
+        flow_preset,
+    )
+    if use_occlusion:
+        flow_bwd_final = _dis_flow(
+            cv.cvtColor((np.clip(gen_pre, 0, 1) * 255).astype(np.uint8), cv.COLOR_RGB2GRAY),
+            gray_orig,
+            flow_preset,
+        )
+        occ_thresh = (
+            occlusion_threshold
+            if occlusion_threshold >= 0
+            else _auto_threshold_mad(_fwd_bwd_error(flow_fwd_final, flow_bwd_final), valid, k=5.0, min_t=1.0, max_t=30.0)
+        )
+        if occlusion_threshold < 0:
+            auto_report["auto_occlusion"] = occ_thresh
+    else:
+        flow_bwd_final = None
+        occ_thresh = 0
+
+    flow_mag = np.sqrt((flow_fwd_final**2).sum(axis=2))
+    stats = {
+        "changed_pct": 100 * float((sharp_mask > 0.5).sum()) / (h * w),
+        "occluded_px": int((_fwd_bwd_error(flow_fwd_final, flow_bwd_final) > occ_thresh).sum()) if use_occlusion else 0,
+        "flow_mean_px": float(flow_mag.mean()),
+        "flow_p99_px": float(np.percentile(flow_mag, 99)),
+        "median_de": 0.0,
+        "resolution": f"{w}x{h}",
+        "diagonal_px": round(diag),
+        "pass1_inliers": inliers,
+        "pass2_used": False,
+        "custom_mask": True,
+        "poisson_used": poisson_blend_edges,
+        "custom_mask_mode": custom_mask_mode,
+    }
+    stats.update(auto_report)
+
+    if debug:
+        debug_images["final_flow"] = _flow_to_color(flow_fwd_final)
+        debug_images["final_alignment"] = (
+            np.hstack([original_np, gen_pre]) if original_np.shape == gen_pre.shape else _stack_images([original_np, gen_pre])
+        )
+        debug_images["composite_breakdown"] = np.hstack([
+            original_np, gen_pre, result, np.stack([composite_mask] * 3, axis=-1),
+        ])
+
+    return result, composite_mask, stats, debug_images
+
+
+def _composite_with_auto_mask(
+    original_np: np.ndarray,
+    generated_np: np.ndarray,
+    *,
+    h: int,
+    w: int,
+    diag: float,
+    gray_orig: np.ndarray,
+    blur_kernel: Tuple[int, int],
+    sk: int,
     delta_e_threshold: float,
     flow_preset: int,
     occlusion_threshold: float,
@@ -608,104 +727,20 @@ def _composite(
     close_radius: int,
     feather_px: float,
     color_match_blend: float,
-    noise_removal_px: int = 0,
-    max_islands: int = 0,
-    fill_holes: bool = False,
-    use_occlusion: bool = False,
-    fill_borders: bool = True,
-    custom_mask: np.ndarray = None,
-    custom_mask_mode: str = "replace",
-    poisson_blend_edges: bool = False,
-    debug: bool = False,
-) -> tuple:
+    noise_removal_px: int,
+    max_islands: int,
+    fill_holes: bool,
+    use_occlusion: bool,
+    fill_borders: bool,
+    custom_mask: np.ndarray,
+    custom_mask_mode: str,
+    poisson_blend_edges: bool,
+    debug: bool,
+    debug_images,
+):
     cv = _require_cv2()
-    h, w = original_np.shape[:2]
-    diag = _diag(h, w)
-    debug_images = {} if debug else None
-
-    orig_u8 = (np.clip(original_np, 0, 1) * 255).astype(np.uint8)
-    gen_u8 = (np.clip(generated_np, 0, 1) * 255).astype(np.uint8)
-    gray_orig = cv.cvtColor(orig_u8, cv.COLOR_RGB2GRAY)
-    gray_gen = cv.cvtColor(gen_u8, cv.COLOR_RGB2GRAY)
-    blur_kernel = _kernel_for_radius(max(1, int(round(diag * 0.008))))
-    sk = max(blur_kernel[0], 5)
-    if sk % 2 == 0:
-        sk += 1
-
     auto_report = {}
-
-    if custom_mask is not None and custom_mask_mode == "replace":
-        gen_pre, _, inliers, valid, debug_sift = _detect_and_align(original_np, generated_np, orig_mask=None, debug=debug)
-        if debug:
-            debug_images["pass1_sift_matches"] = debug_sift.get("match_viz", np.zeros((h, w, 3), dtype=np.float32))
-            debug_images["pass1_validity_mask"] = valid.copy()
-
-        sharp_mask = np.clip(custom_mask, 0.0, 1.0) * valid
-        if fill_borders:
-            sharp_mask = _bleed_mask(sharp_mask, valid)
-
-        if feather_px > 0:
-            inv_mask = (sharp_mask < 0.5).astype(np.uint8)
-            if inv_mask.min() == 0:
-                dist = cv.distanceTransform(inv_mask, cv.DIST_L2, 5)
-                fade_dist = feather_px * 2.5
-                t = np.clip(1.0 - (dist / fade_dist), 0.0, 1.0)
-                composite_mask = (t * t * (3.0 - 2.0 * t)).astype(np.float32)
-            else:
-                composite_mask = sharp_mask
-        else:
-            composite_mask = sharp_mask
-
-        if not fill_borders:
-            composite_mask *= valid
-
-        gen_pre, color_matched = _apply_color_match(original_np, gen_pre, composite_mask, valid, color_match_blend)
-        if color_matched:
-            auto_report["color_match_applied"] = True
-
-        if poisson_blend_edges:
-            result = _seamless_blend(original_np, gen_pre, composite_mask)
-        else:
-            m3 = composite_mask[..., np.newaxis]
-            result = np.clip(original_np * (1.0 - m3) + gen_pre * m3, 0, 1)
-
-        flow_fwd_final = _dis_flow(gray_orig, cv.cvtColor((np.clip(gen_pre, 0, 1) * 255).astype(np.uint8), cv.COLOR_RGB2GRAY), flow_preset)
-        if use_occlusion:
-            flow_bwd_final = _dis_flow(cv.cvtColor((np.clip(gen_pre, 0, 1) * 255).astype(np.uint8), cv.COLOR_RGB2GRAY), gray_orig, flow_preset)
-            occ_thresh = occlusion_threshold if occlusion_threshold >= 0 else _auto_threshold_mad(_fwd_bwd_error(flow_fwd_final, flow_bwd_final), valid, k=5.0, min_t=1.0, max_t=30.0)
-            if occlusion_threshold < 0:
-                auto_report["auto_occlusion"] = occ_thresh
-        else:
-            flow_bwd_final = None
-            occ_thresh = 0
-
-        flow_mag = np.sqrt((flow_fwd_final**2).sum(axis=2))
-        stats = {
-            "changed_pct": 100 * float((sharp_mask > 0.5).sum()) / (h * w),
-            "occluded_px": int((_fwd_bwd_error(flow_fwd_final, flow_bwd_final) > occ_thresh).sum()) if use_occlusion else 0,
-            "flow_mean_px": float(flow_mag.mean()),
-            "flow_p99_px": float(np.percentile(flow_mag, 99)),
-            "median_de": 0.0,
-            "resolution": f"{w}x{h}",
-            "diagonal_px": round(diag),
-            "pass1_inliers": inliers,
-            "pass2_used": False,
-            "custom_mask": True,
-            "poisson_used": poisson_blend_edges,
-            "custom_mask_mode": custom_mask_mode,
-        }
-        stats.update(auto_report)
-
-        if debug:
-            debug_images["final_flow"] = _flow_to_color(flow_fwd_final)
-            debug_images["final_alignment"] = np.hstack([original_np, gen_pre]) if original_np.shape == gen_pre.shape else _stack_images([original_np, gen_pre])
-            debug_images["composite_breakdown"] = np.hstack([
-                original_np, gen_pre, result, np.stack([composite_mask] * 3, axis=-1),
-            ])
-
-        return result, composite_mask, stats, debug_images
-
-    gen_pre_1, H_sift1, inliers_1, valid_1, debug_sift1 = _detect_and_align(original_np, generated_np, orig_mask=None, debug=debug)
+    gen_pre_1, _, inliers_1, valid_1, debug_sift1 = _detect_and_align(original_np, generated_np, orig_mask=None, debug=debug)
 
     if debug:
         debug_images["pass1_sift_matches"] = debug_sift1.get("match_viz", np.zeros((h, w, 3), dtype=np.float32))
@@ -731,7 +766,11 @@ def _composite(
     coarse_mask = (delta_e_1 > thresh_map_1).astype(np.float32)
 
     if use_occlusion:
-        occ_thresh = occlusion_threshold if occlusion_threshold >= 0 else _auto_threshold_mad(_fwd_bwd_error(flow_fwd_1, flow_bwd_1), valid_1, k=5.0, min_t=1.0, max_t=30.0)
+        occ_thresh = (
+            occlusion_threshold
+            if occlusion_threshold >= 0
+            else _auto_threshold_mad(_fwd_bwd_error(flow_fwd_1, flow_bwd_1), valid_1, k=5.0, min_t=1.0, max_t=30.0)
+        )
         coarse_mask = np.maximum(coarse_mask, _occlusion_mask(flow_fwd_1, flow_bwd_1, occ_thresh))
     coarse_mask *= valid_1
 
@@ -740,7 +779,9 @@ def _composite(
         debug_images["pass1_delta_e"] = _apply_heatmap(original_np, de_normalized)
         debug_images["pass1_coarse_mask"] = coarse_mask.copy()
         debug_images["pass1_flow"] = _flow_to_color(flow_fwd_1)
-        debug_images["pass1_alignment"] = np.hstack([original_np, warped_gen_1]) if original_np.shape == warped_gen_1.shape else _stack_images([original_np, warped_gen_1])
+        debug_images["pass1_alignment"] = (
+            np.hstack([original_np, warped_gen_1]) if original_np.shape == warped_gen_1.shape else _stack_images([original_np, warped_gen_1])
+        )
 
     bg_mask_u8 = (coarse_mask < 0.1).astype(np.uint8) * 255
     safe_k = cv.getStructuringElement(cv.MORPH_ELLIPSE, (15, 15))
@@ -748,7 +789,9 @@ def _composite(
 
     pass2_used = False
     if (bg_mask_safe > 0).sum() > (h * w * 0.05):
-        final_aligned_gen, H_sift2, inliers_2, valid_2, debug_sift2 = _detect_and_align(original_np, generated_np, orig_mask=bg_mask_safe, debug=debug)
+        final_aligned_gen, H_sift2, inliers_2, valid_2, debug_sift2 = _detect_and_align(
+            original_np, generated_np, orig_mask=bg_mask_safe, debug=debug
+        )
         if H_sift2 is not None:
             pass2_used = True
             auto_report["pass2_inliers"] = inliers_2
@@ -779,10 +822,16 @@ def _composite(
     coarse_mask_2 = (delta_e_2 > thresh_map_2).astype(np.float32)
 
     if use_occlusion:
-        occ_thresh = occlusion_threshold if occlusion_threshold >= 0 else _auto_threshold_mad(_fwd_bwd_error(flow_fwd_2, flow_bwd_2), valid_2, k=5.0, min_t=1.0, max_t=30.0)
+        occ_thresh = (
+            occlusion_threshold
+            if occlusion_threshold >= 0
+            else _auto_threshold_mad(_fwd_bwd_error(flow_fwd_2, flow_bwd_2), valid_2, k=5.0, min_t=1.0, max_t=30.0)
+        )
         coarse_mask_2 = np.maximum(coarse_mask_2, _occlusion_mask(flow_fwd_2, flow_bwd_2, occ_thresh))
         if occlusion_threshold < 0:
             auto_report["auto_occlusion"] = occ_thresh
+    else:
+        occ_thresh = 0
 
     coarse_mask_2 *= valid_2
     composite_mask = _finalize_mask(
@@ -844,7 +893,11 @@ def _composite(
         stats["custom_mask_mode"] = custom_mask_mode
 
     if debug:
-        debug_images["final_alignment"] = np.hstack([original_np, final_aligned_gen]) if original_np.shape == final_aligned_gen.shape else _stack_images([original_np, final_aligned_gen])
+        debug_images["final_alignment"] = (
+            np.hstack([original_np, final_aligned_gen])
+            if original_np.shape == final_aligned_gen.shape
+            else _stack_images([original_np, final_aligned_gen])
+        )
         debug_images["final_delta_e"] = _apply_heatmap(original_np, np.clip(delta_e_2 / (de_thresh * 1.5 + 1e-6), 0, 1))
         debug_images["final_flow"] = _flow_to_color(flow_fwd_2)
         debug_images["mask_overlay"] = _apply_heatmap(original_np, composite_mask)
@@ -856,6 +909,92 @@ def _composite(
         ])
 
     return result, composite_mask, stats, debug_images
+
+
+def _composite(
+    original_np: np.ndarray,
+    generated_np: np.ndarray,
+    delta_e_threshold: float,
+    flow_preset: int,
+    occlusion_threshold: float,
+    grow_px: int,
+    close_radius: int,
+    feather_px: float,
+    color_match_blend: float,
+    noise_removal_px: int = 0,
+    max_islands: int = 0,
+    fill_holes: bool = False,
+    use_occlusion: bool = False,
+    fill_borders: bool = True,
+    custom_mask: np.ndarray = None,
+    custom_mask_mode: str = "replace",
+    poisson_blend_edges: bool = False,
+    debug: bool = False,
+) -> tuple:
+    cv = _require_cv2()
+    h, w = original_np.shape[:2]
+    diag = _diag(h, w)
+    debug_images = {} if debug else None
+
+    orig_u8 = (np.clip(original_np, 0, 1) * 255).astype(np.uint8)
+    gen_u8 = (np.clip(generated_np, 0, 1) * 255).astype(np.uint8)
+    gray_orig = cv.cvtColor(orig_u8, cv.COLOR_RGB2GRAY)
+    gray_gen = cv.cvtColor(gen_u8, cv.COLOR_RGB2GRAY)
+    blur_kernel = _kernel_for_radius(max(1, int(round(diag * 0.008))))
+    sk = max(blur_kernel[0], 5)
+    if sk % 2 == 0:
+        sk += 1
+
+    auto_report = {}
+
+    if custom_mask is not None and custom_mask_mode == "replace":
+        return _composite_with_custom_mask(
+            original_np,
+            generated_np,
+            h=h,
+            w=w,
+            diag=diag,
+            gray_orig=gray_orig,
+            flow_preset=flow_preset,
+            occlusion_threshold=occlusion_threshold,
+            feather_px=feather_px,
+            color_match_blend=color_match_blend,
+            use_occlusion=use_occlusion,
+            fill_borders=fill_borders,
+            custom_mask=custom_mask,
+            custom_mask_mode=custom_mask_mode,
+            poisson_blend_edges=poisson_blend_edges,
+            debug=debug,
+            debug_images=debug_images,
+        )
+
+    return _composite_with_auto_mask(
+        original_np,
+        generated_np,
+        h=h,
+        w=w,
+        diag=diag,
+        gray_orig=gray_orig,
+        blur_kernel=blur_kernel,
+        sk=sk,
+        delta_e_threshold=delta_e_threshold,
+        flow_preset=flow_preset,
+        occlusion_threshold=occlusion_threshold,
+        grow_px=grow_px,
+        close_radius=close_radius,
+        feather_px=feather_px,
+        color_match_blend=color_match_blend,
+        noise_removal_px=noise_removal_px,
+        max_islands=max_islands,
+        fill_holes=fill_holes,
+        use_occlusion=use_occlusion,
+        fill_borders=fill_borders,
+        custom_mask=custom_mask,
+        custom_mask_mode=custom_mask_mode,
+        poisson_blend_edges=poisson_blend_edges,
+        debug=debug,
+        debug_images=debug_images,
+    )
 
 
 class TuzKleinEditComposite:
@@ -1033,65 +1172,25 @@ class TuzKleinEditComposite:
             debug=enable_debug,
         )
 
-        report_lines = [
-            "=== TUZ Klein Edit Composite ===",
-            f"Resolution:       {stats['resolution']} (diag {stats['diagonal_px']}px)",
-            f"Poisson Blending: {'ENABLED' if stats.get('poisson_used') else 'Disabled'}",
-        ]
+        report_lines = build_report_lines(
+            stats,
+            delta_e_threshold=delta_e_threshold,
+            occlusion_threshold=occlusion_threshold,
+            grow_mask_pct=grow_mask_pct,
+            grow_px=grow_px,
+            noise_removal_pct=noise_removal_pct,
+            noise_removal_px=noise_removal_px,
+            max_islands=max_islands,
+            fill_holes=fill_holes,
+            fill_borders=fill_borders,
+            use_occlusion=use_occlusion,
+            feather_pct=feather_pct,
+            feather_px=feather_px,
+            color_match_blend=color_match_blend,
+            flow_quality=flow_quality,
+        )
 
-        if stats.get("custom_mask"):
-            report_lines.append(f"Mask source:      CUSTOM {stats.get('custom_mask_mode', 'replace').upper()}")
-        elif stats.get("pass2_inliers", 0) > 0:
-            report_lines.append("Alignment:        Two-pass success")
-            report_lines.append(f"Pass 1 Inliers:   {stats['pass1_inliers']}")
-            report_lines.append(f"Pass 2 Inliers:   {stats['pass2_inliers']}")
-        else:
-            report_lines.append(f"Alignment:        {'Pass 2 executed' if stats.get('pass2_used') else 'Pass 2 skipped'}")
-
-        if "auto_delta_e" in stats:
-            report_lines.append(f"Diff Threshold:   AUTO (MAD) -> {stats['auto_delta_e']:.1f}")
-        else:
-            report_lines.append(f"Diff Threshold:   {delta_e_threshold:.1f}")
-
-        if "auto_occlusion" in stats:
-            report_lines.append(f"Occlusion Thresh: AUTO (MAD) -> {stats['auto_occlusion']:.1f}")
-        else:
-            report_lines.append(f"Occlusion Thresh: {occlusion_threshold:.1f}")
-
-        report_lines.extend([
-            f"Grow mask:        {grow_mask_pct:+.1f}% -> {grow_px:+d}px",
-            f"Noise removal:    {noise_removal_pct:.2f}% -> {noise_removal_px}px",
-            f"Max islands:      {max_islands if max_islands > 0 else 'disabled'}",
-            f"Fill holes:       {'yes' if fill_holes else 'no'}",
-            f"Fill borders:     {'yes' if fill_borders else 'no'}",
-            f"Occlusion:        {'enabled' if use_occlusion else 'disabled'}",
-            f"Feather:          {feather_pct:.1f}% -> {feather_px:.0f}px",
-            f"Color Match:      {color_match_blend * 100:.0f}% {'(Applied)' if stats.get('color_match_applied') else '(Skipped)'}",
-            f"Flow quality:     {flow_quality}",
-            f"Changed region:   {stats['changed_pct']:.1f}%",
-            f"Flow mean shift:  {stats['flow_mean_px']:.2f}px",
-            f"Median Diff:      {stats['median_de']:.2f}",
-        ])
-
-        debug_gallery = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
-        if enable_debug:
-            if not debug_images:
-                warning = np.zeros((512, 512, 3), dtype=np.uint8)
-                cv.putText(warning, "DEBUG ENABLED BUT NO DATA", (50, 250), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                cv.putText(warning, "Check that enable_debug=True", (50, 300), cv.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1)
-                debug_gallery = torch.from_numpy(warning.astype(np.float32) / 255.0).unsqueeze(0)
-            else:
-                gallery = _stack_images([
-                    debug_images.get("pass1_sift_matches"),
-                    debug_images.get("pass1_alignment"),
-                    debug_images.get("pass1_delta_e"),
-                    debug_images.get("final_alignment"),
-                    debug_images.get("final_delta_e"),
-                    debug_images.get("final_flow"),
-                    debug_images.get("mask_overlay"),
-                    debug_images.get("composite_breakdown"),
-                ])
-                debug_gallery = torch.from_numpy(gallery.astype(np.float32) / 255.0).unsqueeze(0)
+        debug_gallery = build_debug_gallery(enable_debug, debug_images, cv, _stack_images)
 
         return (
             torch.from_numpy(result.astype(np.float32)).unsqueeze(0),
@@ -1108,6 +1207,4 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TuzKleinEditComposite": "TUZ Klein Edit Composite",
 }
-
-
 

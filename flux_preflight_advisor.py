@@ -14,28 +14,15 @@ import comfy.utils
 import folder_paths
 
 try:  # pragma: no cover - import style depends on package context
-    from .lora_compat import build_compatibility_report, normalize_lora_keys
+    from .lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
     from .lora_meta import analyse_for_node
     from .preflight_policy import build_multi_advice, build_single_advice, _active_slot
 except ImportError:  # pragma: no cover
-    from lora_compat import build_compatibility_report, normalize_lora_keys
+    from lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
     from lora_meta import analyse_for_node
     from preflight_policy import build_multi_advice, build_single_advice, _active_slot
 
 logger = logging.getLogger(__name__)
-
-
-def _build_key_map(model):
-    key_map = {}
-    for model_key in model.model.state_dict().keys():
-        if not model_key.endswith(".weight"):
-            continue
-        base = model_key[: -len(".weight")]
-        bare = base[len("diffusion_model."):] if base.startswith("diffusion_model.") else base
-        for pfx in ("diffusion_model.", "transformer.", ""):
-            key_map[f"{pfx}{bare}"] = model_key
-        key_map["lora_unet_" + bare.replace(".", "_")] = model_key
-    return key_map
 
 
 def _load_lora(lora_name):
@@ -44,6 +31,16 @@ def _load_lora(lora_name):
         raise FileNotFoundError(f"LoRA file not found: {lora_name}")
     lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
     return lora_path, lora_sd
+
+
+def _parse_slot_data(slot_data, use_case="Edit"):
+    try:
+        slots = json.loads(slot_data)
+    except Exception as exc:
+        return None, _failure_report(f"Invalid slot_data JSON: {exc}", use_case=use_case)
+    if not isinstance(slots, list):
+        return None, _failure_report("slot_data must be a JSON list", use_case=use_case)
+    return slots, None
 
 
 def _failure_report(reason, use_case="Edit"):
@@ -82,7 +79,10 @@ class FluxLoraPreflight:
                 "lora_name": (folder_paths.get_filename_list("loras"),),
             },
             "optional": {
-                "use_case": (["Edit", "Generate"], {"default": "Edit"}),
+                "use_case": (["Edit", "Generate"], {
+                    "default": "Edit",
+                    "tooltip": "Edit assumes you want to preserve identity/structure more. Generate assumes freer restyling or text-to-image behavior.",
+                }),
             },
         }
 
@@ -112,7 +112,7 @@ class FluxLoraPreflight:
         try:
             lora_path, lora_sd = _load_lora(lora_name)
             analysis = analyse_for_node(lora_path)
-            key_map = _build_key_map(model)
+            key_map = build_key_map(model)
             compat_report = build_compatibility_report(normalize_lora_keys(lora_sd).keys(), key_map)
             advice = build_single_advice(analysis, compat_report, use_case=use_case, source_name=lora_name)
             return (
@@ -144,10 +144,17 @@ class FluxLoraMultiPreflight:
         return {
             "required": {
                 "model": ("MODEL",),
-                "slot_data": ("STRING", {"default": "[]", "multiline": False}),
+                "slot_data": ("STRING", {
+                    "default": "[]",
+                    "multiline": False,
+                    "tooltip": "JSON slot list using the same shape as TUZ FLUX LoRA Multi. Invalid JSON returns a failure report instead of a silent noop.",
+                }),
             },
             "optional": {
-                "use_case": (["Edit", "Generate"], {"default": "Edit"}),
+                "use_case": (["Edit", "Generate"], {
+                    "default": "Edit",
+                    "tooltip": "Edit assumes more identity preservation. Generate assumes freer composition.",
+                }),
             },
         }
 
@@ -158,14 +165,8 @@ class FluxLoraMultiPreflight:
     TITLE = "TUZ FLUX Multi Preflight Advisor"
 
     def analyze(self, model, slot_data="[]", use_case="Edit"):
-        try:
-            slots = json.loads(slot_data)
-        except Exception as exc:
-            advice = _failure_report(f"Invalid slot_data JSON: {exc}", use_case=use_case)
-            return advice["report"], "[]", 0, advice["risk_level"]
-
-        if not isinstance(slots, list):
-            advice = _failure_report("slot_data must be a JSON list", use_case=use_case)
+        slots, advice = _parse_slot_data(slot_data, use_case=use_case)
+        if advice is not None:
             return advice["report"], "[]", 0, advice["risk_level"]
 
         entries = []
@@ -193,7 +194,7 @@ class FluxLoraMultiPreflight:
             try:
                 lora_path, lora_sd = _load_lora(normalized["lora"])
                 analysis = analyse_for_node(lora_path)
-                key_map = _build_key_map(model)
+                key_map = build_key_map(model)
                 compat_report = build_compatibility_report(normalize_lora_keys(lora_sd).keys(), key_map)
                 advice = build_single_advice(
                     analysis,
@@ -236,4 +237,3 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxLoraPreflight": "TUZ FLUX Preflight Advisor",
     "FluxLoraMultiPreflight": "TUZ FLUX Multi Preflight Advisor",
 }
-

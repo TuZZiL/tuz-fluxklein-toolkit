@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-N_DOUBLE = 8
-N_SINGLE = 24
+try:  # pragma: no cover - package vs direct import
+    from .flux_constants import N_DOUBLE, N_SINGLE
+except ImportError:  # pragma: no cover
+    from flux_constants import N_DOUBLE, N_SINGLE
 
 GOAL_NAMES = ["Edit", "Restyle", "Generate"]
 SAFETY_NAMES = ["Safe", "Balanced", "Strong"]

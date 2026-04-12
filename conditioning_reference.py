@@ -79,6 +79,43 @@ def create_spatial_mask(h: int, w: int, mode: FadeMode, strength: float, *, devi
     return mask.clamp(0.0, 1.0).unsqueeze(0).unsqueeze(0)
 
 
+def _prepare_spatial_mask(
+    mask,
+    *,
+    device: torch.device,
+    lat_h: int,
+    lat_w: int,
+    invert_mask: bool = False,
+    feather: int = 0,
+) -> torch.Tensor:
+    if isinstance(mask, torch.Tensor):
+        spatial_mask = mask.detach().to(device=device, dtype=torch.float32)
+    else:
+        spatial_mask = torch.as_tensor(mask, dtype=torch.float32, device=device)
+    if spatial_mask.ndim == 3 and spatial_mask.shape[0] == 1:
+        spatial_mask = spatial_mask[0]
+    if spatial_mask.ndim == 3 and spatial_mask.shape[-1] == 1:
+        spatial_mask = spatial_mask[..., 0]
+    if spatial_mask.ndim != 2:
+        raise ValueError(f"Expected MASK tensor with shape [B,H,W] or [H,W], got {tuple(spatial_mask.shape)}")
+    if spatial_mask.shape != (lat_h, lat_w):
+        spatial_mask = F.interpolate(
+            spatial_mask.unsqueeze(0).unsqueeze(0), size=(lat_h, lat_w), mode="bilinear", align_corners=False
+        )[0, 0]
+    if invert_mask:
+        spatial_mask = 1.0 - spatial_mask
+    if feather > 0:
+        kernel_size = feather * 2 + 1
+        sigma = feather / 3.0
+        axis = torch.arange(kernel_size, dtype=torch.float32, device=spatial_mask.device) - feather
+        gauss_1d = torch.exp(-0.5 * (axis / sigma) ** 2)
+        gauss_1d = gauss_1d / gauss_1d.sum()
+        kernel = gauss_1d.unsqueeze(0) * gauss_1d.unsqueeze(1)
+        kernel = kernel.unsqueeze(0).unsqueeze(0)
+        spatial_mask = F.conv2d(spatial_mask.unsqueeze(0).unsqueeze(0), kernel, padding=feather)[0, 0].clamp(0.0, 1.0)
+    return spatial_mask
+
+
 def build_replacement(selected: torch.Tensor, mode: ReplaceMode) -> torch.Tensor:
     if mode == "zeros":
         return torch.zeros_like(selected)
@@ -151,32 +188,14 @@ def apply_mask_to_reference_latent(
 
     ref = ref.float().clone()
     _, num_ch, lat_h, lat_w = ref.shape
-
-    if isinstance(mask, torch.Tensor):
-        spatial_mask = mask.detach().to(device=ref.device, dtype=torch.float32)
-    else:
-        spatial_mask = torch.as_tensor(mask, dtype=torch.float32, device=ref.device)
-    if spatial_mask.ndim == 3 and spatial_mask.shape[0] == 1:
-        spatial_mask = spatial_mask[0]
-    if spatial_mask.ndim == 3 and spatial_mask.shape[-1] == 1:
-        spatial_mask = spatial_mask[..., 0]
-    if spatial_mask.ndim != 2:
-        raise ValueError(f"Expected MASK tensor with shape [B,H,W] or [H,W], got {tuple(spatial_mask.shape)}")
-    if spatial_mask.shape != (lat_h, lat_w):
-        spatial_mask = F.interpolate(
-            spatial_mask.unsqueeze(0).unsqueeze(0), size=(lat_h, lat_w), mode="bilinear", align_corners=False
-        )[0, 0]
-    if invert_mask:
-        spatial_mask = 1.0 - spatial_mask
-    if feather > 0:
-        kernel_size = feather * 2 + 1
-        sigma = feather / 3.0
-        axis = torch.arange(kernel_size, dtype=torch.float32, device=spatial_mask.device) - feather
-        gauss_1d = torch.exp(-0.5 * (axis / sigma) ** 2)
-        gauss_1d = gauss_1d / gauss_1d.sum()
-        kernel = gauss_1d.unsqueeze(0) * gauss_1d.unsqueeze(1)
-        kernel = kernel.unsqueeze(0).unsqueeze(0)
-        spatial_mask = F.conv2d(spatial_mask.unsqueeze(0).unsqueeze(0), kernel, padding=feather)[0, 0].clamp(0.0, 1.0)
+    spatial_mask = _prepare_spatial_mask(
+        mask,
+        device=ref.device,
+        lat_h=lat_h,
+        lat_w=lat_w,
+        invert_mask=invert_mask,
+        feather=feather,
+    )
 
     ch_start, ch_end = _resolve_channel_range(
         num_ch,
@@ -210,32 +229,14 @@ def apply_masked_reference_mix(
 
     ref = ref.float().clone()
     _, num_ch, lat_h, lat_w = ref.shape
-
-    if isinstance(mask, torch.Tensor):
-        spatial_mask = mask.detach().to(device=ref.device, dtype=torch.float32)
-    else:
-        spatial_mask = torch.as_tensor(mask, dtype=torch.float32, device=ref.device)
-    if spatial_mask.ndim == 3 and spatial_mask.shape[0] == 1:
-        spatial_mask = spatial_mask[0]
-    if spatial_mask.ndim == 3 and spatial_mask.shape[-1] == 1:
-        spatial_mask = spatial_mask[..., 0]
-    if spatial_mask.ndim != 2:
-        raise ValueError(f"Expected MASK tensor with shape [B,H,W] or [H,W], got {tuple(spatial_mask.shape)}")
-    if spatial_mask.shape != (lat_h, lat_w):
-        spatial_mask = F.interpolate(
-            spatial_mask.unsqueeze(0).unsqueeze(0), size=(lat_h, lat_w), mode="bilinear", align_corners=False
-        )[0, 0]
-    if invert_mask:
-        spatial_mask = 1.0 - spatial_mask
-    if feather > 0:
-        kernel_size = feather * 2 + 1
-        sigma = feather / 3.0
-        axis = torch.arange(kernel_size, dtype=torch.float32, device=spatial_mask.device) - feather
-        gauss_1d = torch.exp(-0.5 * (axis / sigma) ** 2)
-        gauss_1d = gauss_1d / gauss_1d.sum()
-        kernel = gauss_1d.unsqueeze(0) * gauss_1d.unsqueeze(1)
-        kernel = kernel.unsqueeze(0).unsqueeze(0)
-        spatial_mask = F.conv2d(spatial_mask.unsqueeze(0).unsqueeze(0), kernel, padding=feather)[0, 0].clamp(0.0, 1.0)
+    spatial_mask = _prepare_spatial_mask(
+        mask,
+        device=ref.device,
+        lat_h=lat_h,
+        lat_w=lat_w,
+        invert_mask=invert_mask,
+        feather=feather,
+    )
 
     ch_start, ch_end = _resolve_channel_range(
         num_ch,
@@ -283,4 +284,3 @@ def rebalance_reference_appearance(
     detail = selected - lowpass
     result[:, ch_start:ch_end, :, :] = lowpass * float(appearance_scale) + detail * float(detail_scale)
     return result.to(dtype=ref.dtype)
-

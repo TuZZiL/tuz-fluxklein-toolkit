@@ -70,6 +70,11 @@ Advisory node for pre-run LoRA inspection. It analyzes the LoRA file plus model 
 
 The multi-slot advisor uses the same slot JSON shape as `TUZ FLUX LoRA Multi` and returns `recommended_slot_data_json` for each active slot. It is advisory-only and does not inspect or recommend `schedule`.
 
+Quick terminology:
+- `recommended_edit_mode=None` means **Raw / No Protection**, not "missing value"
+- `recommended_balance` is the amount of preset behavior to keep:
+  `0.0 = strongest preset effect`, `1.0 = raw LoRA behavior`
+
 ### TUZ FLUX LoRA Loader
 
 Single LoRA loader with interactive per-layer graph widget and optional auto-strength.
@@ -164,6 +169,141 @@ Practical upgrades in the current version:
 - **Mask mix modes**: `TUZ FLUX.2 Klein Mask Ref Controller` now supports `mask_action=scale|mix`. `mix` can replace masked regions with `zeros`, `gaussian_noise`, `channel_mean`, or `lowpass_reference`.
 - **Prompt/reference balance modes**: `TUZ FLUX.2 Klein Text/Ref Balance` keeps the original `attn_patch` behavior by default and also supports `latent_mix` for direct reference-latent control.
 - **Appearance/detail rebalance**: `TUZ FLUX.2 Klein Ref Latent Controller` can optionally boost coarse appearance and dampen fine detail before attention-path scaling.
+
+Quick terminology:
+- `reference_index` / `target_reference_index`:
+  `0` = first reference, `1` = second, `-1` = all references
+- `attn_patch`:
+  change reference strength inside attention during sampling
+- `latent_mix`:
+  weaken or replace part of the reference latent before sampling
+- `mask_action=scale`:
+  keep the same reference latent and dampen it
+- `mask_action=mix`:
+  replace masked regions with a different latent signal
+- `channel_mask_start=0` and `channel_mask_end=0`:
+  use the full latent channel range unless you deliberately want a narrower slice
+
+### Practical Companion Workflows
+
+These nodes are most useful when you treat them as **small corrective tools** around a normal Klein edit graph, not as replacements for the LoRA loader itself.
+
+Recommended base flow:
+```text
+reference image -> VAE Encode -> ReferenceLatent
+text prompt -> conditioning
+LoRA loader -> model
+conditioning companion nodes -> conditioning/model
+sampler -> decode -> TUZ Klein Edit Composite
+```
+
+#### 1. Keep identity stronger during clothing or accessory edits
+
+Use:
+```text
+ReferenceLatent -> TUZ FLUX.2 Klein Text/Ref Balance -> CFGGuider
+                                      \-> TUZ FLUX.2 Klein Ref Latent Controller -> model
+```
+
+Start with:
+- `Text/Ref Balance`: `balance=0.55` to `0.70`
+- `Ref Latent Controller`: `strength=1.1` to `1.4`
+- If you have multiple references, set `reference_index=-1` only when all references should stay equally strong
+
+Practical effect:
+- prompt changes still apply
+- face and core structure drift less
+- useful for try-on, accessory swaps, and identity-sensitive edits
+
+#### 2. Protect only one region of the reference
+
+Use:
+```text
+conditioning -> TUZ FLUX.2 Klein Mask Ref Controller -> sampler
+```
+
+Start with:
+- `mask_action=scale`
+- `strength=0.7` to `1.0`
+- `channel_mode=all`
+- `feather=8` to `20`
+
+When to switch to `mask_action=mix`:
+- the masked region still leaks too much structure
+- you want harder removal or replacement inside the masked area
+
+Good `mix` starting points:
+- `replace_mode=zeros` for strongest suppression
+- `replace_mode=lowpass_reference` for softer cleanup that keeps coarse structure
+- `target_reference_index=-1` only when all references should be masked the same way
+
+#### 3. Push prompt harder or pull reference harder
+
+Use:
+```text
+conditioning -> TUZ FLUX.2 Klein Text/Ref Balance
+```
+
+Modes:
+- `balance_mode=attn_patch`:
+  best default; light-touch control during sampling
+- `balance_mode=latent_mix`:
+  stronger intervention; directly reduces reference latent influence
+
+Start with:
+- `attn_patch` for normal edits
+- `latent_mix` only when the prompt keeps underfiring or the reference dominates too much
+
+Rule of thumb:
+- lower `balance` toward `0.25` to weaken text and keep reference stronger
+- raise `balance` toward `0.75` to let text take over more aggressively
+
+#### 4. Keep overall look but soften detail rigidity
+
+Use:
+```text
+model + conditioning -> TUZ FLUX.2 Klein Ref Latent Controller
+```
+
+Start with:
+- `appearance_scale=1.10` to `1.25`
+- `detail_scale=0.60` to `0.85`
+- `blur_radius=2` or `3`
+
+Practical effect:
+- preserves coarse appearance and broad color/form
+- reduces fine-detail lock that can make edits feel stiff
+- especially useful when the reference is over-constraining fabrics, skin texture, or small accessories
+
+#### 5. Reduce color drift late in sampling
+
+Use:
+```text
+model -> TUZ FLUX.2 Klein Color Anchor -> sampler
+```
+
+Start with:
+- `strength=0.25` to `0.50`
+- `ramp_curve=1.5`
+- `channel_weights=uniform`
+
+Use `channel_weights=by_variance` when:
+- some channels are clearly noisier than others
+- you want gentler color anchoring with less overcorrection
+
+Use `ref_index=-1` when:
+- multiple references define the palette together
+- you want an averaged color anchor instead of a single dominant source
+
+#### 6. Multi-reference practical rule
+
+If one reference is the main identity source and another is only style/support:
+- keep `reference_index` / `target_reference_index` on the primary ref first
+- avoid `-1` until you know you want symmetric behavior across all refs
+
+If all references are intended to cooperate equally:
+- `-1` is the cleanest option
+- use lower strengths than in single-reference mode because the aggregate conditioning is already stronger
 
 ### TUZ Klein Edit Composite
 

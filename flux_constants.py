@@ -1,0 +1,11 @@
+"""
+Shared FLUX / Klein architecture constants.
+"""
+
+N_DOUBLE = 8
+N_SINGLE = 24
+TOTAL_COMPONENTS = N_DOUBLE * 2 + N_SINGLE
+
+AUTO_STRENGTH_FLOOR = 0.30
+AUTO_STRENGTH_CEILING = 1.50
+

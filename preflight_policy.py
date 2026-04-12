@@ -11,12 +11,11 @@ import json
 
 try:  # pragma: no cover - import style depends on package context
     from .edit_presets import auto_select_preset
+    from .flux_constants import N_DOUBLE, N_SINGLE, TOTAL_COMPONENTS
 except ImportError:  # pragma: no cover
     from edit_presets import auto_select_preset
+    from flux_constants import N_DOUBLE, N_SINGLE, TOTAL_COMPONENTS
 
-N_DOUBLE = 8
-N_SINGLE = 24
-TOTAL_COMPONENTS = N_DOUBLE * 2 + N_SINGLE
 
 
 def _clamp(value, low, high):
@@ -401,4 +400,3 @@ def build_multi_advice(entries, use_case="Edit", source_name=None):
         "warnings": warnings,
         "slot_entries": adjusted_entries,
     }
-

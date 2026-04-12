@@ -21,8 +21,11 @@ Values are multipliers relative to global_strength:
   1.0 = full LoRA effect, 0.3 = 30% effect, 1.15 = 115% (boosted)
 """
 
-N_DOUBLE = 8
-N_SINGLE = 24
+try:  # pragma: no cover - package vs direct import
+    from .flux_constants import N_DOUBLE, N_SINGLE
+except ImportError:  # pragma: no cover
+    from flux_constants import N_DOUBLE, N_SINGLE
+
 USE_CASE_NAMES = ["Edit", "Generate"]
 GRAPH_PRESET_MAP = {
     "face": "Preserve Face",

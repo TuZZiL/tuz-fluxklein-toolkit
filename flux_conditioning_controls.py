@@ -139,17 +139,44 @@ class Flux2KleinRefLatentController:
             "required": {
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.05}),
-                "reference_index": ("INT", {"default": 0, "min": -1, "max": 63}),
+                "strength": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 1000.0, "step": 0.05,
+                    "tooltip": "How strongly to preserve the selected reference tokens inside attention. Higher values keep the reference more dominant.",
+                }),
+                "reference_index": ("INT", {
+                    "default": 0, "min": -1, "max": 63,
+                    "tooltip": "Which reference to target. Use -1 to target all references instead of only one.",
+                }),
             },
             "optional": {
-                "spatial_fade": (["none", "center_out", "edges_out", "top_down", "left_right"], {"default": "none"}),
-                "spatial_fade_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "appearance_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05}),
-                "detail_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05}),
-                "blur_radius": ("INT", {"default": 2, "min": 1, "max": 32, "step": 1}),
-                "channel_mask_start": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
-                "channel_mask_end": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "spatial_fade": (["none", "center_out", "edges_out", "top_down", "left_right"], {
+                    "default": "none",
+                    "tooltip": "Optional spatial bias for the preserved reference signal. Useful when only some image regions should stay stronger.",
+                }),
+                "spatial_fade_strength": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "How strongly the spatial fade should bias the preserved reference regions.",
+                }),
+                "appearance_scale": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05,
+                    "tooltip": "Scale the coarse, low-frequency appearance signal before attention-path preservation.",
+                }),
+                "detail_scale": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05,
+                    "tooltip": "Scale the fine-detail component before attention-path preservation. Lower values loosen rigid texture/detail lock.",
+                }),
+                "blur_radius": ("INT", {
+                    "default": 2, "min": 1, "max": 32, "step": 1,
+                    "tooltip": "Blur radius used to split coarse appearance from fine detail.",
+                }),
+                "channel_mask_start": ("INT", {
+                    "default": 0, "min": 0, "max": 4096, "step": 1,
+                    "tooltip": "Optional channel range start for appearance/detail rebalance. Leave 0/0 to use the full latent channel range.",
+                }),
+                "channel_mask_end": ("INT", {
+                    "default": 0, "min": 0, "max": 4096, "step": 1,
+                    "tooltip": "Optional channel range end for appearance/detail rebalance. Leave 0/0 to use the full latent channel range.",
+                }),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
@@ -250,12 +277,24 @@ class Flux2KleinTextRefBalance:
             "required": {
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
-                "balance": ("FLOAT", {"default": 0.500, "min": 0.000, "max": 1.000, "step": 0.001}),
+                "balance": ("FLOAT", {
+                    "default": 0.500, "min": 0.000, "max": 1.000, "step": 0.001,
+                    "tooltip": "0.0 = keep reference stronger, 1.0 = let text take over more aggressively.",
+                }),
             },
             "optional": {
-                "balance_mode": (["attn_patch", "latent_mix"], {"default": "attn_patch"}),
-                "target_reference_index": ("INT", {"default": -1, "min": -1, "max": 63, "step": 1}),
-                "replace_mode": (["zeros", "gaussian_noise", "channel_mean", "lowpass_reference"], {"default": "zeros"}),
+                "balance_mode": (["attn_patch", "latent_mix"], {
+                    "default": "attn_patch",
+                    "tooltip": "attn_patch changes reference strength during attention. latent_mix directly reduces reference latent influence before sampling.",
+                }),
+                "target_reference_index": ("INT", {
+                    "default": -1, "min": -1, "max": 63, "step": 1,
+                    "tooltip": "Which reference to target. Use -1 to affect all references.",
+                }),
+                "replace_mode": (["zeros", "gaussian_noise", "channel_mean", "lowpass_reference"], {
+                    "default": "zeros",
+                    "tooltip": "How latent_mix should weaken the reference: remove it, replace it with noise, keep only the mean, or keep only coarse low-frequency structure.",
+                }),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
@@ -342,16 +381,46 @@ class Flux2KleinMaskRefController:
                 "mask": ("MASK",),
             },
             "optional": {
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "invert_mask": ("BOOLEAN", {"default": False}),
-                "feather": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
-                "channel_mode": (["all", "low", "high"], {"default": "all"}),
-                "channel_mask_start": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
-                "channel_mask_end": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
-                "mask_action": (["scale", "mix"], {"default": "scale"}),
-                "reference_keep": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "replace_mode": (["zeros", "gaussian_noise", "channel_mean", "lowpass_reference"], {"default": "zeros"}),
-                "target_reference_index": ("INT", {"default": 0, "min": -1, "max": 63, "step": 1}),
+                "strength": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "How strongly the mask should protect or modify the selected reference regions.",
+                }),
+                "invert_mask": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Invert the mask so the untouched area becomes the affected area.",
+                }),
+                "feather": ("INT", {
+                    "default": 0, "min": 0, "max": 64, "step": 1,
+                    "tooltip": "Softens mask edges before applying the operation.",
+                }),
+                "channel_mode": (["all", "low", "high"], {
+                    "default": "all",
+                    "tooltip": "Which half of the latent channels to affect. Use all unless you are deliberately separating coarse and fine behavior.",
+                }),
+                "channel_mask_start": ("INT", {
+                    "default": 0, "min": 0, "max": 4096, "step": 1,
+                    "tooltip": "Optional explicit channel range start. Leave 0/0 to fall back to channel_mode.",
+                }),
+                "channel_mask_end": ("INT", {
+                    "default": 0, "min": 0, "max": 4096, "step": 1,
+                    "tooltip": "Optional explicit channel range end. Leave 0/0 to fall back to channel_mode.",
+                }),
+                "mask_action": (["scale", "mix"], {
+                    "default": "scale",
+                    "tooltip": "scale keeps the same reference and dampens it. mix replaces masked regions with a different latent signal.",
+                }),
+                "reference_keep": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "Only used in mix mode. 1.0 keeps the original reference, 0.0 fully replaces the masked region.",
+                }),
+                "replace_mode": (["zeros", "gaussian_noise", "channel_mean", "lowpass_reference"], {
+                    "default": "zeros",
+                    "tooltip": "What to put into masked regions when mask_action=mix.",
+                }),
+                "target_reference_index": ("INT", {
+                    "default": 0, "min": -1, "max": 63, "step": 1,
+                    "tooltip": "Which reference to target. Use -1 to affect all references.",
+                }),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
@@ -453,12 +522,24 @@ class Flux2KleinColorAnchor:
             "required": {
                 "model": ("MODEL",),
                 "conditioning": ("CONDITIONING",),
-                "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "strength": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "How strongly to pull sampled colors back toward the selected reference palette.",
+                }),
             },
             "optional": {
-                "ramp_curve": ("FLOAT", {"default": 1.5, "min": 0.5, "max": 8.0, "step": 0.1}),
-                "ref_index": ("INT", {"default": 0, "min": -1, "max": 63}),
-                "channel_weights": (["uniform", "by_variance"], {"default": "uniform"}),
+                "ramp_curve": ("FLOAT", {
+                    "default": 1.5, "min": 0.5, "max": 8.0, "step": 0.1,
+                    "tooltip": "How quickly color correction ramps in during sampling. Higher values hold correction back longer.",
+                }),
+                "ref_index": ("INT", {
+                    "default": 0, "min": -1, "max": 63,
+                    "tooltip": "Which reference to use for color anchoring. Use -1 to average all references together.",
+                }),
+                "channel_weights": (["uniform", "by_variance"], {
+                    "default": "uniform",
+                    "tooltip": "uniform treats all channels equally. by_variance trusts stable channels more and noisy channels less.",
+                }),
                 "debug": ("BOOLEAN", {"default": False}),
             },
         }
