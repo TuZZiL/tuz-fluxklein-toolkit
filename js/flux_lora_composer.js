@@ -101,6 +101,10 @@ function normalizeSlot(initial) {
         lora: initial?.lora ?? "None",
         strength: typeof initial?.strength === "number" ? initial.strength : 1.0,
         role: ROLES.includes(initial?.role) ? initial.role : "Main Edit",
+        anatomy_profile: initial?.anatomy_profile ?? "None",
+        anatomy_strength: typeof initial?.anatomy_strength === "number" ? initial.anatomy_strength : 0.65,
+        anatomy_strict_zero: initial?.anatomy_strict_zero ?? false,
+        anatomy_custom_json: initial?.anatomy_custom_json ?? "",
     };
 }
 
@@ -131,6 +135,10 @@ function serializeSlots(slots) {
         lora: slot.lora,
         strength: slot.strength,
         role: slot.role,
+        anatomy_profile: slot.anatomy_profile,
+        anatomy_strength: slot.anatomy_strength,
+        anatomy_strict_zero: slot.anatomy_strict_zero,
+        anatomy_custom_json: slot.anatomy_custom_json,
     })));
 }
 

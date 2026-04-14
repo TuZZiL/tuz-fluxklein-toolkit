@@ -137,6 +137,9 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 | `auto_strength` | boolean | Auto-compute per-layer strengths from ΔW analysis |
 | `edit_mode` | dropdown | Protection level — `Auto` is the recommended start |
 | `balance` | float | Protection dial: 0.0 = raw LoRA, 1.0 = full preset protection |
+| `anatomy_profile` | dropdown | Opt-in body-preservation profile for clothing / body edits |
+| `anatomy_strength` | float | How strongly the anatomy profile should protect structure |
+| `anatomy_strict_zero` | boolean | Advanced. Hard-disable the most sensitive blocks in the profile |
 
 **Graph widget:** 8 double-block columns (img purple / txt teal) + 24 single-block columns (green).
 - Drag to adjust individual layer strength
@@ -144,6 +147,15 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 - Click to toggle a bar on/off
 
 **Auto-strength:** Analyzes the LoRA's weight tensors and auto-fills optimal per-layer strengths. You can still manually tweak afterwards.
+
+**Anatomy Shield:** Use this when a LoRA keeps changing the body shape while you only want the clothes or surface details to move.
+- `Undress Safe` is the default starting point for clothing removal.
+- `Undress Body Lock` is stricter and keeps the silhouette steadier.
+- `Robot Frame Lock` is the safest start for humanoid robots or mech edits.
+- Keep `anatomy_profile=None` if you want the old behavior unchanged.
+- Start with `anatomy_strength=0.60–0.70`; raise it only if the body still drifts.
+
+**Practical rule:** `edit_mode` controls how much protection the LoRA gets per layer, while `anatomy_profile` adds a higher-level body-preservation preset on top. Use both only when you actually need them.
 
 ### TUZ FLUX LoRA Multi
 
@@ -163,6 +175,11 @@ Slot 1: editing LoRA       → edit_mode=Auto, strength=0.6–0.8
 Slot 2: consistency LoRA   → edit_mode=Auto, strength=0.4–0.6
 Slot 3: enhancer LoRA      → edit_mode=None, strength=0.2–0.4
 ```
+
+If you are doing clothing removal or body-preserving edits, keep the anatomy profile on the main slot only. Suggested starts:
+- `Undress Safe` for normal clothing removal.
+- `Undress Body Lock` when the body shape must stay stable.
+- `Armor Hard Surface` for armor or rigid outfits.
 
 ### TUZ FLUX LoRA Scheduled
 

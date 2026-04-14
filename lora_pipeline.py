@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 try:  # pragma: no cover - package vs direct import
+    from .anatomy_profiles import resolve_profile as resolve_anatomy_profile
     from .edit_presets import EDIT_PRESETS, interpolate_preset, resolve_preset_selection
     from .flux_constants import (
         AUTO_STRENGTH_CEILING,
@@ -26,6 +27,7 @@ try:  # pragma: no cover - package vs direct import
     )
     from .lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
 except ImportError:  # pragma: no cover
+    from anatomy_profiles import resolve_profile as resolve_anatomy_profile
     from edit_presets import EDIT_PRESETS, interpolate_preset, resolve_preset_selection
     from flux_constants import AUTO_STRENGTH_CEILING, AUTO_STRENGTH_FLOOR, N_DOUBLE, N_SINGLE
     from lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
@@ -277,6 +279,48 @@ def apply_edit_multipliers(lora_sd, preset_cfg):
     return scaled
 
 
+def apply_anatomy_profile(lora_sd, profile_cfg, strict_zero=False):
+    if not profile_cfg:
+        return lora_sd
+
+    db_cfg = {str(k): v for k, v in profile_cfg.get("db", {}).items()}
+    sb_cfg = {str(k): v for k, v in profile_cfg.get("sb", {}).items()}
+    zero_cfg = profile_cfg.get("strict_zero", {}) if strict_zero else {}
+    zero_db = {str(i) for i in zero_cfg.get("db", [])}
+    zero_sb = {str(i) for i in zero_cfg.get("sb", [])}
+    scaled = {}
+
+    for key, tensor in lora_sd.items():
+        if not (key.endswith(".lora_B.weight") or key.endswith(".lora_up.weight")):
+            scaled[key] = tensor
+            continue
+        parts = key.split(".")
+        multiplier = None
+        for i, part in enumerate(parts):
+            if part == "double_blocks" and i + 1 < len(parts):
+                idx = parts[i + 1]
+                if idx in zero_db:
+                    multiplier = 0.0
+                elif idx in db_cfg:
+                    cfg = db_cfg[idx]
+                    is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
+                    side = "txt" if is_txt else "img"
+                    multiplier = cfg.get(side, 1.0) if isinstance(cfg, dict) else float(cfg)
+                break
+            if part == "single_blocks" and i + 1 < len(parts):
+                idx = parts[i + 1]
+                if idx in zero_sb:
+                    multiplier = 0.0
+                elif idx in sb_cfg:
+                    multiplier = float(sb_cfg[idx])
+                break
+        if multiplier is not None and abs(multiplier - 1.0) > 1e-6:
+            scaled[key] = tensor * multiplier
+        else:
+            scaled[key] = tensor
+    return scaled
+
+
 def collect_compatibility_report(lora_sd, key_map):
     return build_compatibility_report(_normalize_keys(lora_sd).keys(), key_map)
 
@@ -420,6 +464,10 @@ def prepare_patch_data(
     auto_convert,
     edit_mode,
     balance,
+    anatomy_profile="None",
+    anatomy_strength=0.65,
+    anatomy_strict_zero=False,
+    anatomy_custom_json="",
     use_case="Edit",
     layer_cfg=None,
     auto_strength=False,
@@ -455,6 +503,15 @@ def prepare_patch_data(
                 logger.exception(f"[{node_label}] Failed to send auto-strength update to UI")
 
     edit_preset_cfg = resolve_edit_mode(edit_mode, balance, lora_path, node_label, use_case=use_case)
+    try:
+        anatomy_profile_cfg = resolve_anatomy_profile(
+            anatomy_profile,
+            strength=anatomy_strength,
+            custom_json=anatomy_custom_json,
+        )
+    except Exception as exc:
+        logger.warning(f"[{node_label}] Invalid anatomy profile settings ignored: {exc}")
+        anatomy_profile_cfg = None
 
     if auto_convert and is_diffusers_format(lora_sd):
         logger.info(f"[{node_label}] Detected diffusers format -> converting")
@@ -465,6 +522,12 @@ def prepare_patch_data(
 
     if edit_preset_cfg:
         lora_sd = apply_edit_multipliers(lora_sd, edit_preset_cfg)
+    if anatomy_profile_cfg:
+        lora_sd = apply_anatomy_profile(lora_sd, anatomy_profile_cfg, strict_zero=anatomy_strict_zero)
+        logger.info(
+            f"[{node_label}] Anatomy profile '{anatomy_profile}' applied"
+            f" (strength={float(anatomy_strength):.2f}, strict_zero={bool(anatomy_strict_zero)})"
+        )
 
     key_map = build_key_map(model)
     compat_report = collect_compatibility_report(lora_sd, key_map)
@@ -488,6 +551,10 @@ def load_and_patch(
     auto_convert,
     edit_mode,
     balance,
+    anatomy_profile="None",
+    anatomy_strength=0.65,
+    anatomy_strict_zero=False,
+    anatomy_custom_json="",
     use_case="Edit",
     layer_cfg=None,
     auto_strength=False,
@@ -501,6 +568,10 @@ def load_and_patch(
         auto_convert,
         edit_mode,
         balance,
+        anatomy_profile,
+        anatomy_strength,
+        anatomy_strict_zero,
+        anatomy_custom_json,
         use_case,
         layer_cfg=layer_cfg,
         auto_strength=auto_strength,

@@ -53,6 +53,7 @@ from .edit_presets import (
     USE_CASE_NAMES,
     build_graph_presets,
 )
+from .anatomy_profiles import ANATOMY_PROFILE_NAMES
 from .lora_compat import build_key_map
 from .schedules import SCHEDULE_NAMES, build_keyframes
 from .composer_policy import (
@@ -132,6 +133,28 @@ class FluxLoraLoader:
                     "step": 0.05,
                     "tooltip": "How much preset protection to apply. 0.0 = raw LoRA behavior, 1.0 = full preset protection.",
                 }),
+                "anatomy_profile": (ANATOMY_PROFILE_NAMES, {
+                    "default": "None",
+                    "tooltip": "Intent-based body preservation profile. Use it when a clothing or body LoRA changes anatomy more than you want.",
+                }),
+                "anatomy_strength": ("FLOAT", {
+                    "default": 0.65,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "tooltip": "How strongly the selected anatomy profile should protect structure. 0.0 = disabled, 1.0 = full profile effect.",
+                }),
+                "anatomy_strict_zero": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "Strict zero blocks",
+                    "label_off": "Soft anatomy shield",
+                    "tooltip": "Advanced. Hard-disables the most sensitive blocks listed by the active anatomy profile.",
+                }),
+                "anatomy_custom_json": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Advanced JSON override used only when anatomy_profile=Custom.",
+                }),
                 # Canonical graph button masks from edit_presets.py — hidden by JS
                 "graph_presets": ("STRING", {"default": json.dumps(build_graph_presets(), sort_keys=True)}),
                 # Written by the JS graph widget — never shown as a text box
@@ -149,7 +172,10 @@ class FluxLoraLoader:
 
     def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
-                  edit_mode="None", balance=0.5, graph_presets=None, node_id=None):
+                  edit_mode="None", balance=0.5,
+                  anatomy_profile="None", anatomy_strength=0.65,
+                  anatomy_strict_zero=False, anatomy_custom_json="",
+                  graph_presets=None, node_id=None):
         if strength == 0:
             return (model,)
 
@@ -157,7 +183,8 @@ class FluxLoraLoader:
         layer_cfg = _parse_layer_strengths_json(layer_strengths, "FLUX LoRA Loader")
 
         model_out = _load_and_patch(
-            model, lora_name, strength, auto_convert, edit_mode, balance, use_case,
+            model, lora_name, strength, auto_convert, edit_mode, balance,
+            anatomy_profile, anatomy_strength, anatomy_strict_zero, anatomy_custom_json, use_case,
             layer_cfg=layer_cfg, auto_strength=auto_strength,
             node_label="FLUX LoRA Loader", node_id=node_id,
         )
@@ -219,12 +246,17 @@ class FluxLoraMulti:
             use_case  = slot.get("use_case", "Edit")
             edit_mode = slot.get("edit_mode", "None")
             balance   = slot.get("balance", 0.5)
+            anatomy_profile = slot.get("anatomy_profile", "None")
+            anatomy_strength = slot.get("anatomy_strength", 0.65)
+            anatomy_strict_zero = slot.get("anatomy_strict_zero", False)
+            anatomy_custom_json = slot.get("anatomy_custom_json", "")
 
             if not enabled or lora_name == "None" or strength == 0:
                 continue
 
             current = _load_and_patch(
-                current, lora_name, strength, auto_convert, edit_mode, balance, use_case,
+                current, lora_name, strength, auto_convert, edit_mode, balance,
+                anatomy_profile, anatomy_strength, anatomy_strict_zero, anatomy_custom_json, use_case,
                 node_label=f"FLUX LoRA Multi slot {i+1}",
             )
 
@@ -322,6 +354,10 @@ class FluxLoraComposer:
                 auto_convert,
                 entry["edit_mode"],
                 entry["balance"],
+                entry.get("anatomy_profile", "None"),
+                entry.get("anatomy_strength", 0.65),
+                entry.get("anatomy_strict_zero", False),
+                entry.get("anatomy_custom_json", ""),
                 use_case="Edit" if goal == "Edit" else "Generate",
                 layer_cfg=entry["layer_cfg"],
                 auto_strength=False,

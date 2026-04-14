@@ -97,6 +97,10 @@ def normalize_slot(slot):
         "strength": float(slot.get("strength", 1.0)),
         "role": role,
         "collapsed": bool(slot.get("collapsed", True)),
+        "anatomy_profile": slot.get("anatomy_profile", "None"),
+        "anatomy_strength": float(slot.get("anatomy_strength", 0.65)),
+        "anatomy_strict_zero": bool(slot.get("anatomy_strict_zero", False)),
+        "anatomy_custom_json": slot.get("anatomy_custom_json", ""),
     }
 
 
@@ -122,10 +126,16 @@ def assign_main_edit(slots):
 
 def role_edit_profile(role, safety="Balanced"):
     policy = ROLE_POLICIES.get(role, ROLE_POLICIES["Main Edit"])
-    return {
+    profile = {
         "edit_mode": policy["edit_mode"],
         "balance": _clamp(policy["balance"] + SAFETY_BALANCE_OFFSETS.get(safety, 0.0), 0.0, 1.0),
+        # Keep anatomy shielding opt-in for Composer to avoid silent behavior
+        # changes in existing workflows that relied on prior defaults.
+        "anatomy_profile": "None",
+        "anatomy_strength": 0.65,
+        "anatomy_strict_zero": False,
     }
+    return profile
 
 
 def build_group_profile(role, goal="Edit"):
@@ -178,6 +188,11 @@ def compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=
             "conflicts": [],
             **edit_profile,
         }
+        if normalized["anatomy_profile"] not in (None, "", "None"):
+            entry["anatomy_profile"] = normalized["anatomy_profile"]
+            entry["anatomy_strength"] = _clamp(normalized["anatomy_strength"], 0.0, 1.0)
+            entry["anatomy_strict_zero"] = normalized["anatomy_strict_zero"]
+            entry["anatomy_custom_json"] = normalized["anatomy_custom_json"]
         prepared.append(entry)
         if normalized["enabled"] and normalized["lora"] != "None" and abs(normalized["strength"]) > 1e-8:
             active_indices.append(index)

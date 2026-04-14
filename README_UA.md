@@ -137,6 +137,9 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 | `auto_strength` | boolean | Авто-обчислення per-layer strength з ΔW аналізу |
 | `edit_mode` | dropdown | Рівень захисту — `Auto` рекомендований старт |
 | `balance` | float | Діал захисту: 0.0 = "сира" LoRA, 1.0 = повний захист пресету |
+| `anatomy_profile` | dropdown | Opt-in профіль збереження тіла для clothing / body edit |
+| `anatomy_strength` | float | Наскільки сильно anatomy profile має захищати структуру |
+| `anatomy_strict_zero` | boolean | Advanced. Жорстко вимикає найчутливіші блоки профілю |
 
 **Граф-віджет:** 8 double-block колонок (img фіолетові / txt бірюзові) + 24 single-block колонки (зелені).
 - Перетягуйте для налаштування
@@ -144,6 +147,15 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 - Клік перемикає бар вкл/викл
 
 **Auto-strength:** Аналізує тензори ваг LoRA і автоматично заповнює оптимальні per-layer strengths. Після цього ви все ще можете вручну підправити.
+
+**Anatomy Shield:** Використовуйте, коли LoRA постійно змінює форму тіла, а вам треба рухати лише одяг або поверхневі деталі.
+- `Undress Safe` - стартовий профіль для зняття одягу.
+- `Undress Body Lock` - жорсткіший режим, сильніше тримає силует.
+- `Robot Frame Lock` - найкращий старт для humanoid robot або mech edits.
+- Залишайте `anatomy_profile=None`, якщо хочете стару поведінку без змін.
+- Починайте з `anatomy_strength=0.60–0.70`; піднімайте лише якщо тіло все ще пливе.
+
+**Практичне правило:** `edit_mode` керує тим, наскільки LoRA захищена по шарах, а `anatomy_profile` додає поверх цього високорівневий пресет збереження тіла. Використовуйте обидва лише тоді, коли це справді потрібно.
 
 ### TUZ FLUX LoRA Multi
 
@@ -163,6 +175,11 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 Слот 2: consistency LoRA   → edit_mode=Auto, strength=0.4–0.6
 Слот 3: enhancer LoRA      → edit_mode=None, strength=0.2–0.4
 ```
+
+Якщо ви робите body-preserving edit або знімаєте одяг, anatomy profile ставте лише на головний слот. Стартові варіанти:
+- `Undress Safe` для звичайного зняття одягу.
+- `Undress Body Lock`, якщо силует має лишатися стабільним.
+- `Armor Hard Surface` для броні або жорсткого одягу.
 
 ### TUZ FLUX LoRA Scheduled
 

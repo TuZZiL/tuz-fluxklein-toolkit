@@ -54,3 +54,19 @@
 - [x] Add shared sigma-progress and reference-selection helpers for reuse.
 - [x] Add unit tests for structure locking, masking, and no-op behavior.
 - [x] Update README docs in both languages with practical usage guidance.
+
+## Anatomy Shield v1
+
+- [ ] Finalize profile registry schema (`anatomy_profiles.py`) with intent-based presets.
+- [ ] Implement anatomy profile application stage in `lora_pipeline.py` after `edit_mode` merge.
+- [ ] Add `strict_zero` handling for selected block ranges.
+- [ ] Add anatomy inputs to `FluxLoraLoader`, `FluxLoraMulti`, and Composer slot schema.
+- [ ] Add unit tests for profile interpolation, band expansion, and merge precedence.
+- [ ] Add contract tests for new JSON fields in slot payloads.
+- [ ] Update README EN/UA with practical “choose profile” guide and troubleshooting.
+- [ ] Validate on regression matrix (human male/female, robot, stylized, armor scenarios).
+
+## Summary
+
+- Added implementation plan draft: `tasks/anatomy_shield_implementation_plan.md`.
+- Plan includes scope, architecture, profile catalog with starter values, phased rollout, and user-facing practical workflow.

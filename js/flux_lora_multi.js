@@ -115,6 +115,10 @@ function normalizeSlot(initial) {
         use_case: initial?.use_case ?? "Edit",
         edit_mode: initial?.edit_mode ?? "None",
         balance: typeof initial?.balance === "number" ? initial.balance : 0.5,
+        anatomy_profile: initial?.anatomy_profile ?? "None",
+        anatomy_strength: typeof initial?.anatomy_strength === "number" ? initial.anatomy_strength : 0.65,
+        anatomy_strict_zero: initial?.anatomy_strict_zero ?? false,
+        anatomy_custom_json: initial?.anatomy_custom_json ?? "",
         collapsed: initial?.collapsed ?? true,
     };
 }
@@ -127,6 +131,10 @@ function makeDefaultSlot(overrides = {}) {
         use_case: "Edit",
         edit_mode: "None",
         balance: 0.5,
+        anatomy_profile: "None",
+        anatomy_strength: 0.65,
+        anatomy_strict_zero: false,
+        anatomy_custom_json: "",
         collapsed: true,
         ...overrides,
     });
@@ -152,6 +160,10 @@ function serializeSlots(slots) {
         use_case: slot.use_case,
         edit_mode: slot.edit_mode,
         balance: slot.balance,
+        anatomy_profile: slot.anatomy_profile,
+        anatomy_strength: slot.anatomy_strength,
+        anatomy_strict_zero: slot.anatomy_strict_zero,
+        anatomy_custom_json: slot.anatomy_custom_json,
         collapsed: slot.collapsed,
     })));
 }

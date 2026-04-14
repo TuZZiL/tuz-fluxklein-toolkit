@@ -31,6 +31,7 @@ class ComposerPolicyTests(unittest.TestCase):
         strong = role_edit_profile("Style", safety="Strong")
         self.assertEqual(safe["edit_mode"], "Style Only")
         self.assertLess(safe["balance"], strong["balance"])
+        self.assertEqual(safe["anatomy_profile"], "None")
 
     def test_build_group_profile_reflects_goal_modifier(self):
         edit = build_group_profile("Style", goal="Edit")
@@ -86,6 +87,25 @@ class ComposerPolicyTests(unittest.TestCase):
         policies = compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=True)
         self.assertEqual(policies[0]["layer_cfg"], {})
         self.assertEqual(policies[0]["edit_mode"], "None")
+        self.assertEqual(policies[0]["anatomy_profile"], "None")
+
+    def test_slot_level_anatomy_override_beats_role_default(self):
+        slots = [
+            {
+                "enabled": True,
+                "lora": "edit.safetensors",
+                "strength": 1.0,
+                "role": "Main Edit",
+                "anatomy_profile": "Robot Frame Lock",
+                "anatomy_strength": 0.9,
+                "anatomy_strict_zero": True,
+                "anatomy_custom_json": '{"db_img":0.5,"db_txt":0.5,"sb_bands":[0.5,0.5,0.5,0.5,0.5,0.5]}',
+            },
+        ]
+        policies = compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=True)
+        self.assertEqual(policies[0]["anatomy_profile"], "Robot Frame Lock")
+        self.assertEqual(policies[0]["anatomy_strength"], 0.9)
+        self.assertTrue(policies[0]["anatomy_strict_zero"])
 
     def test_scale_budgets_unchanged_for_two_loras(self):
         base = {"db_img": 2.80, "sb_late": 1.80}
