@@ -14,3 +14,5 @@
 - done: Performed focused UI quality review for `FluxLoraMulti` card widget (`js/flux_lora_multi.js`) with usability/clarity/risk findings and improvement priorities.
 - done: Rebranded project metadata for Comfy Manager submission to `TUZ FluxKlein Toolkit` (`pyproject` DisplayName + normalized package name + README titles).
 - done: Updated repository/documentation/issue URLs and install clone commands to renamed repo `https://github.com/TuZZiL/tuz-fluxklein-toolkit`.
+- done: Aligned Loader docs to new `protection` naming with explicit legacy `balance` compatibility notes (EN/UA).
+- resolved: Unified protection field naming across Loader/Multi/Scheduled (`protection` primary, legacy `balance` accepted for backward compatibility in Python + Multi JS slot contract).

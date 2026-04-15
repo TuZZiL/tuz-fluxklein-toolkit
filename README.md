@@ -97,7 +97,7 @@ Think of `edit_mode` as a **protection dial**, not a category label:
 | **Boost Prompt** | Nothing (strengthens text instead) | When prompt feels too weak |
 | **None** | Nothing | Raw LoRA behavior, full freedom |
 
-### The protection dial (`balance`)
+### The protection dial (`protection`, legacy `balance`)
 
 Acts like a protection dial: `0.0` is raw LoRA, `1.0` is full preset protection.
 
@@ -107,8 +107,8 @@ Raw LoRA (no protection)    Full preset protection
 ```
 
 **Rule of thumb:**
-- Face keeps getting overwritten? → Raise `balance` toward 1.0
-- Edit feels too weak or "too safe"? → Lower `balance` toward 0.0
+- Face keeps getting overwritten? → Raise `protection` toward 1.0
+- Edit feels too weak or "too safe"? → Lower `protection` toward 0.0
 
 ### Edit vs Generate (`use_case`)
 
@@ -136,7 +136,7 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 | `auto_convert` | boolean | Convert diffusers-format LoRAs to native FLUX format |
 | `auto_strength` | boolean | Auto-compute per-layer strengths from ΔW analysis |
 | `edit_mode` | dropdown | Protection level — `Auto` is the recommended start |
-| `balance` | float | Protection dial: 0.0 = raw LoRA, 1.0 = full preset protection |
+| `protection` | float | Protection dial: 0.0 = raw LoRA, 1.0 = full preset protection (`balance` is still accepted as legacy input) |
 | `anatomy_profile` | dropdown | Opt-in body-preservation profile for clothing / body edits |
 | `anatomy_strength` | float | How strongly the anatomy profile should protect structure |
 | `anatomy_strict_zero` | boolean | Advanced. Hard-disable the most sensitive blocks in the profile |
@@ -193,7 +193,7 @@ Per-step LoRA strength control using ComfyUI's native Hook Keyframes. The LoRA e
 | `strength` | float | Base LoRA strength (0.0–2.0) |
 | `schedule` | dropdown | Strength curve profile |
 | `edit_mode` | dropdown | Protection level (supports Auto) |
-| `balance` | float | Raw LoRA ↔ preset protection |
+| `protection` | float | Raw LoRA ↔ preset protection (`balance` is still accepted as legacy input) |
 | `keyframes` | int | Number of keyframes (2–10) |
 
 **Returns:** `MODEL` + `CONDITIONING`
@@ -387,13 +387,13 @@ original image + generated edit → VAE Decode → TUZ Klein Edit Composite → 
 ### Recipe 1: Basic clothing edit with face protection
 
 ```
-LoRA Loader: edit_mode=Preserve Face, strength=0.7, balance=0.7
+LoRA Loader: edit_mode=Preserve Face, strength=0.7, protection=0.7
 ```
 
 ### Recipe 2: Style transfer without structural damage
 
 ```
-LoRA Loader: edit_mode=Style Only, strength=0.5, balance=0.5
+LoRA Loader: edit_mode=Style Only, strength=0.5, protection=0.5
 ```
 
 ### Recipe 3: Multi-LoRA with identity lock
@@ -408,7 +408,7 @@ Slot 2: enhancer       → edit_mode=None, strength=0.3
 ### Recipe 4: Prompt feels too weak
 
 ```
-LoRA Loader: edit_mode=Boost Prompt, strength=0.8, balance=0.6
+LoRA Loader: edit_mode=Boost Prompt, strength=0.8, protection=0.6
 ```
 
 ### Recipe 5: Keep overall look but allow edits to "breathe"
@@ -522,7 +522,7 @@ A: "Raw / No Protection" — not "nothing selected". The LoRA runs with all laye
 A: Check `auto_convert` is ON. If using a GGUF model, ensure [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) is installed.
 
 **Q: Auto mode picks the wrong preset for my use case.**
-A: Auto can't read your intent. Switch to manual: `Preserve Face` for identity work, `None` for full freedom. Use the `balance` protection dial to fine-tune.
+A: Auto can't read your intent. Switch to manual: `Preserve Face` for identity work, `None` for full freedom. Use the `protection` dial to fine-tune (`balance` still works as a legacy alias).
 
 **Q: How do I know which preset Auto picked?**
 A: Check the ComfyUI console. It logs e.g. `Auto → Preserve Body (protection=0.75)`.

@@ -126,7 +126,7 @@ class FluxLoraLoader:
                     "default": "None",
                     "tooltip": "How protective the loader should be. Auto is the safest starting point. 'None' here means Raw / No Protection, not an unselected value.",
                 }),
-                "balance": ("FLOAT", {
+                "protection": ("FLOAT", {
                     "default": 0.5,
                     "min": 0.0,
                     "max": 1.0,
@@ -172,18 +172,23 @@ class FluxLoraLoader:
 
     def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
-                  edit_mode="None", balance=0.5,
+                  edit_mode="None", protection=0.5,
                   anatomy_profile="None", anatomy_strength=0.65,
                   anatomy_strict_zero=False, anatomy_custom_json="",
-                  graph_presets=None, node_id=None):
+                  graph_presets=None, node_id=None, balance=None):
         if strength == 0:
             return (model,)
+
+        # Backward compatibility: accept legacy `balance` value from older
+        # workflows/API payloads and map it to the new visible `protection` dial.
+        if balance is not None:
+            protection = balance
 
         # Parse per-layer strengths from graph widget
         layer_cfg = _parse_layer_strengths_json(layer_strengths, "FLUX LoRA Loader")
 
         model_out = _load_and_patch(
-            model, lora_name, strength, auto_convert, edit_mode, balance,
+            model, lora_name, strength, auto_convert, edit_mode, protection,
             anatomy_profile, anatomy_strength, anatomy_strict_zero, anatomy_custom_json, use_case,
             layer_cfg=layer_cfg, auto_strength=auto_strength,
             node_label="FLUX LoRA Loader", node_id=node_id,
@@ -199,7 +204,7 @@ class FluxLoraMulti:
     """
     Dynamic multi-LoRA loader with per-slot control.
     Slots are managed by JS widget (+ Add LoRA / ✕ Remove).
-    Each slot has: enabled, lora, strength, use_case, edit_mode, balance.
+    Each slot has: enabled, lora, strength, use_case, edit_mode, protection.
     """
 
     @classmethod
@@ -245,7 +250,7 @@ class FluxLoraMulti:
             strength  = slot.get("strength", 1.0)
             use_case  = slot.get("use_case", "Edit")
             edit_mode = slot.get("edit_mode", "None")
-            balance   = slot.get("balance", 0.5)
+            protection = slot.get("protection", slot.get("balance", 0.5))
             anatomy_profile = slot.get("anatomy_profile", "None")
             anatomy_strength = slot.get("anatomy_strength", 0.65)
             anatomy_strict_zero = slot.get("anatomy_strict_zero", False)
@@ -255,7 +260,7 @@ class FluxLoraMulti:
                 continue
 
             current = _load_and_patch(
-                current, lora_name, strength, auto_convert, edit_mode, balance,
+                current, lora_name, strength, auto_convert, edit_mode, protection,
                 anatomy_profile, anatomy_strength, anatomy_strict_zero, anatomy_custom_json, use_case,
                 node_label=f"FLUX LoRA Multi slot {i+1}",
             )
@@ -422,7 +427,7 @@ class FluxLoraScheduled:
                     "default": "Auto",
                     "tooltip": "How protective the loader should be across Klein layers. Auto analyzes the LoRA and picks a starting mode for you.",
                 }),
-                "balance": ("FLOAT", {
+                "protection": ("FLOAT", {
                     "default": 0.5,
                     "min": 0.0,
                     "max": 1.0,
@@ -451,11 +456,14 @@ class FluxLoraScheduled:
     TITLE = "TUZ FLUX LoRA Scheduled"
 
     def load_lora(self, model, conditioning, lora_name, strength, use_case="Edit", schedule="Fade Out",
-                  edit_mode="Auto", balance=0.5, auto_convert=True, keyframes=5):
+                  edit_mode="Auto", protection=0.5, auto_convert=True, keyframes=5, balance=None):
         import comfy.hooks
 
         if strength == 0:
             return (model, conditioning)
+
+        if balance is not None:
+            protection = balance
 
         lora_path = folder_paths.get_full_path("loras", lora_name)
         lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
@@ -467,7 +475,7 @@ class FluxLoraScheduled:
 
         # Apply edit-mode multipliers (per-layer control)
         edit_preset_cfg = _resolve_edit_mode(
-            edit_mode, balance, lora_path, "FLUX LoRA Scheduled", use_case=use_case
+            edit_mode, protection, lora_path, "FLUX LoRA Scheduled", use_case=use_case
         )
         if edit_preset_cfg:
             lora_sd = _apply_edit_multipliers(lora_sd, edit_preset_cfg)

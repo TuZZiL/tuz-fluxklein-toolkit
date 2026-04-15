@@ -124,13 +124,16 @@ function snapToStep(value, step, min = -Infinity, max = Infinity, precision = 2)
 }
 
 function normalizeSlot(initial) {
+    const protectionRaw = typeof initial?.protection === "number"
+        ? initial.protection
+        : (typeof initial?.balance === "number" ? initial.balance : 0.5);
     return {
         enabled: initial?.enabled ?? true,
         lora: initial?.lora ?? "None",
         strength: typeof initial?.strength === "number" ? initial.strength : 1.0,
         use_case: initial?.use_case ?? "Edit",
         edit_mode: initial?.edit_mode ?? "None",
-        balance: typeof initial?.balance === "number" ? initial.balance : 0.5,
+        protection: protectionRaw,
         anatomy_profile: initial?.anatomy_profile ?? "None",
         anatomy_strength: typeof initial?.anatomy_strength === "number" ? initial.anatomy_strength : 0.65,
         anatomy_strict_zero: initial?.anatomy_strict_zero ?? false,
@@ -146,7 +149,7 @@ function makeDefaultSlot(overrides = {}) {
         strength: 1.0,
         use_case: "Edit",
         edit_mode: "None",
-        balance: 0.5,
+        protection: 0.5,
         anatomy_profile: "None",
         anatomy_strength: 0.65,
         anatomy_strict_zero: false,
@@ -175,7 +178,9 @@ function serializeSlots(slots) {
         strength: slot.strength,
         use_case: slot.use_case,
         edit_mode: slot.edit_mode,
-        balance: slot.balance,
+        protection: slot.protection,
+        // Legacy alias for backward compatibility with older builds.
+        balance: slot.protection,
         anatomy_profile: slot.anatomy_profile,
         anatomy_strength: slot.anatomy_strength,
         anatomy_strict_zero: slot.anatomy_strict_zero,
@@ -818,7 +823,7 @@ app.registerExtension({
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px sans-serif";
                 ctx.fillText(slot.use_case, card.x + 16, metaY);
-                ctx.fillText(`Prot ${slot.balance.toFixed(2)}`, card.x + 74, metaY);
+                ctx.fillText(`Prot ${slot.protection.toFixed(2)}`, card.x + 74, metaY);
                 const anatomyText = fitText(ctx, anatomySummary(slot, true), card.w - 230);
                 ctx.fillText(anatomyText, card.x + 138, metaY);
 
@@ -881,10 +886,10 @@ app.registerExtension({
                 ctx.font = "500 10px sans-serif";
                 ctx.fillText("Protection", innerX, balanceLabelY);
                 ctx.textAlign = "right";
-                ctx.fillText(slot.balance.toFixed(2), innerX + innerW, balanceLabelY);
+                ctx.fillText(slot.protection.toFixed(2), innerX + innerW, balanceLabelY);
                 ctx.textAlign = "left";
                 const balanceRect = { x: innerX, y: balanceLabelY + 4, w: innerW, h: 14 };
-                drawBalanceBar(ctx, balanceRect, slot.balance, true);
+                drawBalanceBar(ctx, balanceRect, slot.protection, true);
 
                 const strengthLabelY = card.y + 158;
                 ctx.fillStyle = THEME.textSoft;
@@ -955,7 +960,7 @@ app.registerExtension({
                     useCase: useCaseRect,
                     editMode: modeRect,
                     anatomyProfile: anatomyRect,
-                    balance: balanceRect,
+                    protection: balanceRect,
                     strength: strengthRect,
                     anatomyStrength: anatomyStrengthRect,
                     anatomyStrict: strictRect,
@@ -1193,8 +1198,8 @@ app.registerExtension({
                         openAnatomyProfileSelector(index, event);
                         return true;
                     }
-                    if (pointInRect(mx, my, bounds.balance)) {
-                        startSlider(index, "balance", bounds.balance, BALANCE_RANGE, mx);
+                    if (pointInRect(mx, my, bounds.protection)) {
+                        startSlider(index, "protection", bounds.protection, BALANCE_RANGE, mx);
                         return true;
                     }
                     if (pointInRect(mx, my, bounds.strength)) {
