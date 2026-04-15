@@ -1,4 +1,4 @@
-# ComfyUI FLUX.2 Klein LoRA Loader
+# TUZ FluxKlein Toolkit
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -31,7 +31,7 @@
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
+git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 # Перезапустіть ComfyUI
 ```
 

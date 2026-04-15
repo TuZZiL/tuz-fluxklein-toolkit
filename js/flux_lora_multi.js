@@ -906,7 +906,7 @@ app.registerExtension({
                 const anatomyStrengthRect = { x: innerX, y: anatomyStrengthLabelY + 4, w: innerW, h: 14 };
                 drawBalanceBar(ctx, anatomyStrengthRect, slot.anatomy_strength, true);
 
-                const strictRect = { x: innerX, y: card.y + 206, w: halfW, h: 22 };
+                const strictRect = { x: innerX, y: card.y + 202, w: halfW, h: 26 };
                 roundRect(ctx, strictRect.x, strictRect.y, strictRect.w, strictRect.h, 6);
                 ctx.fillStyle = THEME.surface2;
                 ctx.fill();
@@ -915,16 +915,18 @@ app.registerExtension({
                 ctx.stroke();
                 ctx.fillStyle = THEME.textMuted;
                 ctx.font = "500 10px sans-serif";
-                ctx.textBaseline = "middle";
-                ctx.fillText("Strict zero", strictRect.x + 10, strictRect.y + strictRect.h / 2 + 0.5);
+                ctx.fillText("Strict zero", strictRect.x + 10, strictRect.y + strictRect.h * 0.42);
+                ctx.fillStyle = THEME.text;
+                ctx.font = "600 11px monospace";
+                ctx.fillText(slot.anatomy_strict_zero ? "Enabled" : "Disabled", strictRect.x + 10, strictRect.y + strictRect.h * 0.73);
                 ctx.textBaseline = "alphabetic";
                 drawToggle(
                     ctx,
-                    { x: strictRect.x + strictRect.w - 40, y: strictRect.y + 3, w: 30, h: 16 },
+                    { x: strictRect.x + strictRect.w - 40, y: strictRect.y + 5, w: 30, h: 16 },
                     !!slot.anatomy_strict_zero
                 );
 
-                const customRect = { x: innerX + halfW + halfGap, y: card.y + 206, w: halfW, h: 22 };
+                const customRect = { x: innerX + halfW + halfGap, y: card.y + 202, w: halfW, h: 26 };
                 drawCardField(
                     ctx,
                     customRect,
@@ -932,7 +934,7 @@ app.registerExtension({
                     slot.anatomy_profile === "Custom" ? "Edit..." : "Only for Custom"
                 );
 
-                const actionY = card.y + card.h - 26;
+                const actionY = card.y + card.h - 24;
                 const actionRects = {
                     duplicate: { x: innerX, y: actionY, w: 72, h: 18 },
                     toggle: { x: innerX + 80, y: actionY, w: 72, h: 18 },

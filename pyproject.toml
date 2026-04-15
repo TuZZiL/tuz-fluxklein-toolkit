@@ -1,5 +1,5 @@
 [project]
-name = "Comfyui-flux2klein-Lora-loader"
+name = "tuz-fluxklein-toolkit"
 description = "Architecture-aware LoRA loader for FLUX.2 Klein in ComfyUI with automatic per-layer strength calibration."
 version = "1.0.0"
 license = {file = "LICENSE"} 
@@ -25,14 +25,14 @@ dependencies = [
 
 
 [project.urls]
-Repository = "https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader"
+Repository = "https://github.com/TuZZiL/tuz-fluxklein-toolkit"
 #  Used by Comfy Registry https://registry.comfy.org
-Documentation = "https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader/wiki"
-"Bug Tracker" = "https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader/issues"
+Documentation = "https://github.com/TuZZiL/tuz-fluxklein-toolkit/wiki"
+"Bug Tracker" = "https://github.com/TuZZiL/tuz-fluxklein-toolkit/issues"
 
 [tool.comfy]
 PublisherId = "capitan01r"
-DisplayName = "Comfyui-flux2klein-Lora-loader"
+DisplayName = "TUZ FluxKlein Toolkit"
 Icon = ""
 includes = [] 
 # "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility

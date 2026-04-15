@@ -10,3 +10,7 @@
 - done: Added anatomy controls to `FluxLoraMulti` expanded cards (`anatomy_profile`, `anatomy_strength`, `anatomy_strict_zero`, custom JSON editor for `Custom` profile).
 - done: Added compact anatomy status hint per slot and profile-list loading from `FluxLoraLoader` object info with local fallback values.
 - resolved: Multi UI now exposes anatomy slot fields already supported by backend `slot_data` contract.
+- resolved: Fixed visual misalignment in Multi anatomy row by unifying `Strict zero` and `Custom JSON` geometry/typography (same height and baseline rhythm).
+- done: Performed focused UI quality review for `FluxLoraMulti` card widget (`js/flux_lora_multi.js`) with usability/clarity/risk findings and improvement priorities.
+- done: Rebranded project metadata for Comfy Manager submission to `TUZ FluxKlein Toolkit` (`pyproject` DisplayName + normalized package name + README titles).
+- done: Updated repository/documentation/issue URLs and install clone commands to renamed repo `https://github.com/TuZZiL/tuz-fluxklein-toolkit`.
