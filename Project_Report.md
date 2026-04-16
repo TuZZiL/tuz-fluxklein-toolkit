@@ -6,6 +6,8 @@
 - done: Implemented beginner-friendly README refresh in `README.md` and `README_UA.md`.
 - resolved: Added start-here flow, screenshot, glossary, beginner recipes, troubleshooting, and optional advanced reference labels.
 - resolved: Clarified loader `protection` vs `balance` and the separate `Text/Ref Balance` control.
+- done: Fixed `Structure Lock` device mismatch by moving reference latent onto the sampler tensor device before blending.
+- resolved: `apply_structure_lock` now works with CUDA `denoised` tensors and CPU-origin reference latents.
 - next: If desired, do a final read-through on GitHub-rendered markdown for spacing/visual balance.
 
 ## 2026-04-15

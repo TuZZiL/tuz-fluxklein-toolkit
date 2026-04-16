@@ -308,7 +308,7 @@ def apply_structure_lock(
         return denoised
 
     working = denoised.to(dtype=torch.float32).clone()
-    ref_work = ref.to(dtype=torch.float32)
+    ref_work = ref.to(device=working.device, dtype=torch.float32)
     if ref_work.shape[0] != working.shape[0]:
         ref_work = ref_work[:1].expand(working.shape[0], -1, -1, -1)
     if ref_work.shape[-2:] != working.shape[-2:]:
