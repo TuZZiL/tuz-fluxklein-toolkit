@@ -4,9 +4,23 @@
 
 Architecture-aware LoRA loading for **FLUX.2 Klein** (9B) in ComfyUI.
 
+[If you're new, start with the steps below before reading the technical sections.](#start-here)
+
 [Українська версія](README_UA.md)
 
 ---
+
+## Start Here
+
+If you only want one working first run:
+
+1. Install the pack in `ComfyUI/custom_nodes`.
+2. Restart ComfyUI.
+3. Add **TUZ FLUX LoRA Loader** from `loaders/FLUX`.
+4. Leave `auto_convert` ON, set `edit_mode=Auto`, `strength=0.7`, and `use_case=Edit`.
+5. Run one simple test image with a single LoRA.
+
+If the node appears in the menu and the image changes, the setup worked.
 
 ## The Problem
 
@@ -45,15 +59,36 @@ Find **TUZ FLUX LoRA Loader** in the node menu under `loaders/FLUX`. Connect you
 ### Step 3: Pick your LoRA and go
 
 1. Select your LoRA file
-2. Set `edit_mode` → **Auto** (recommended starting point)
-3. Set `strength` → **0.7** (safe default)
-4. Generate!
+2. Leave `auto_convert` ON
+3. Set `edit_mode` → **Auto** (recommended starting point)
+4. Set `strength` → **0.7** (safe default)
+5. Leave `auto_strength` OFF for the first test
+6. Generate!
 
-That's it. Auto mode analyzes your LoRA weights and picks the best protection level. Adjust from there.
+That's it. Auto mode analyzes your LoRA weights and picks the best protection level. If you are editing a reference image, keep `use_case=Edit`. Adjust from there.
 
 ---
 
+![TUZ FLUX node layout screenshot](images/nodes.png)
+
+*The screenshot shows the loader and graph widget in ComfyUI.*
+
+## Beginner Glossary
+
+These are the terms you will see most often. If you only remember one thing, keep `auto_convert` on and start with `edit_mode=Auto`.
+
+| Term | Simple meaning |
+|---|---|
+| `edit_mode` | Chooses the protection style. `Auto` is the safest first choice. |
+| `protection` | How strong the chosen preset should be. Legacy `balance` still works for old workflows. |
+| `use_case` | Tells `Auto` whether you are editing a reference image or generating freely. |
+| `auto_convert` | Converts many downloaded FLUX LoRAs into the format Klein expects. Leave it on unless you know the file is already native. |
+| `auto_strength` | Automatically spreads strength across layers. Useful later, not required for the first test. |
+| `anatomy_profile` | Extra body-preservation preset for clothing or body edits. Leave it off until you need it. |
+
 ## Node Overview
+
+If you are new, you only need the loader for the first test. The rest are optional.
 
 This pack provides **7 nodes** organized into 3 groups:
 
@@ -214,7 +249,7 @@ Analyzes a LoRA file + model compatibility and returns recommendations **without
 |---|---|---|
 | `report` | STRING | Human-readable summary with warnings |
 | `recommended_edit_mode` | STRING | Suggested preset |
-| `recommended_balance` | FLOAT | Suggested protection value |
+| `recommended_balance` | FLOAT | Suggested protection value (legacy output key) |
 | `recommended_strength` | FLOAT | Safe starting strength |
 | `compat_status` | STRING | `ok`, `partial`, or `failed` |
 | `matched_modules` | INT | LoRA modules that matched the model |
@@ -269,6 +304,8 @@ How to tune:
 Practical use: keep the same face or pose, but loosen the stiffness in clothing texture or fine detail.
 
 ### Text/Ref Balance
+
+Note: this node's `balance` is separate from the loader's `protection` dial and its legacy `balance` alias.
 
 This shifts control between prompt and reference. `attn_patch` adjusts attention directly, while `latent_mix` weakens reference influence before sampling.
 
@@ -382,45 +419,47 @@ original image + generated edit → VAE Decode → TUZ Klein Edit Composite → 
 
 ---
 
-## Practical Recipes
+## Beginner Recipes
 
-### Recipe 1: Basic clothing edit with face protection
-
-```
-LoRA Loader: edit_mode=Preserve Face, strength=0.7, protection=0.7
-```
-
-### Recipe 2: Style transfer without structural damage
+### Recipe 1: First LoRA, safe default
 
 ```
-LoRA Loader: edit_mode=Style Only, strength=0.5, protection=0.5
+LoRA Loader: auto_convert=ON, use_case=Edit, edit_mode=Auto, strength=0.7, protection=0.5
 ```
 
-### Recipe 3: Multi-LoRA with identity lock
+Use this when you just want to confirm the node is working. If the effect is too strong, lower `strength` first.
+
+### Recipe 2: Clothing edit with face protection
 
 ```
-Slot 1: clothing LoRA  → edit_mode=Preserve Body, strength=0.7
-Slot 2: enhancer       → edit_mode=None, strength=0.3
-+ Text/Ref Balance: balance=0.6 (push prompt a bit harder)
-+ Color Anchor: strength=0.3 (prevent color shift)
+LoRA Loader: auto_convert=ON, use_case=Edit, edit_mode=Preserve Face, strength=0.65-0.75, protection=0.7
 ```
 
-### Recipe 4: Prompt feels too weak
+Use this when the LoRA changes clothes or accessories but must keep the person recognizable.
+
+### Recipe 3: Simple multi-LoRA stack
 
 ```
-LoRA Loader: edit_mode=Boost Prompt, strength=0.8, protection=0.6
+Slot 1: editing LoRA     → edit_mode=Auto, strength=0.6–0.8
+Slot 2: consistency LoRA → edit_mode=Auto, strength=0.4–0.6
+Slot 3: enhancer LoRA    → edit_mode=None, strength=0.2–0.4
 ```
 
-### Recipe 5: Keep overall look but allow edits to "breathe"
-
-```
-LoRA Loader: edit_mode=Auto
-+ Ref Latent Controller: appearance_scale=1.15, detail_scale=0.7
-```
+If you need body stability, keep `anatomy_profile` on Slot 1 only. Treat `protection` as the main dial, and ignore legacy `balance` unless you open an older workflow.
 
 ---
 
-## How It Works Under The Hood
+## Troubleshooting
+
+- LoRA has no visible effect: make sure `auto_convert` is on, the model is loaded, and the LoRA file is in `models/loras`. If the file came from diffusers, leave the converter on.
+- Auto picked the wrong preset: switch from `Auto` to `Preserve Face` or `None`. Auto is a best guess, not a mind reader.
+- Model/LoRA mismatch: this pack is made for FLUX.2 Klein and also works with FLUX.1. If you are using GGUF, install [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF).
+- `TUZ Klein Edit Composite` is missing: install `opencv-python-headless`.
+- The image changed, but too little: raise `strength` first before changing the preset.
+
+---
+
+## Advanced Reference (optional)
 
 <details>
 <summary><b>Format conversion (click to expand)</b></summary>

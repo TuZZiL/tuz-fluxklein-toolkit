@@ -1,5 +1,13 @@
 # Project Report
 
+## 2026-04-16
+- context: Reviewed README clarity for end users.
+- done: Assessed README structure, onboarding flow, and terminology density.
+- done: Implemented beginner-friendly README refresh in `README.md` and `README_UA.md`.
+- resolved: Added start-here flow, screenshot, glossary, beginner recipes, troubleshooting, and optional advanced reference labels.
+- resolved: Clarified loader `protection` vs `balance` and the separate `Text/Ref Balance` control.
+- next: If desired, do a final read-through on GitHub-rendered markdown for spacing/visual balance.
+
 ## 2026-04-15
 - context: Start of session.
 - done: Initialized project memory file.
