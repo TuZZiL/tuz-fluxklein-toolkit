@@ -213,8 +213,12 @@ def analyse_for_node(path):
             up_shape = up_info["shape"]
             dn_mat   = dn_arr.reshape(dn_shape[0], -1).astype(np.float32)
             up_mat   = up_arr.reshape(up_shape[0], -1).astype(np.float32)
-            delta_w  = up_mat @ dn_mat
-            dw_norm  = float(np.linalg.norm(delta_w, "fro"))
+            # ||up @ down||_F^2 = tr((up^T @ up) @ (down @ down^T))
+            # Only r×r products are needed, so the full ΔW (out×in) matrix is
+            # never materialized — ~100x faster for Klein-scale layers.
+            up_sq    = up_mat.T @ up_mat          # r×r
+            dn_sq    = dn_mat @ dn_mat.T          # r×r
+            dw_norm  = float(np.sqrt(max(0.0, np.trace(up_sq @ dn_sq))))
 
             alpha    = alpha_values.get(base)
             rank_val = layer_ranks.get(base, 1)

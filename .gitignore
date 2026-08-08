@@ -2,6 +2,16 @@
 gha-creds-*.json
 Project_Report.md
 
+# Python build artifacts
+__pycache__/
+*.pyc
+
 # Local ComfyUI workflow exports
 Flux2_Organized*.json
 workflow_*.json
+
+# Local-only assets (not part of the repo)
+.crush/
+.test_tmp/
+Loras/
+external_refs/

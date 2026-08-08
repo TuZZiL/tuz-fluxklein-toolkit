@@ -506,13 +506,13 @@ def _all_norms(analysis):
     out = []
     for i in range(N_DOUBLE):
         db = analysis["db"].get(i, {})
-        if db.get("img") is not None:
+        if db.get("img") is not None and db["img"] > 1e-8:
             out.append(db["img"])
-        if db.get("txt") is not None:
+        if db.get("txt") is not None and db["txt"] > 1e-8:
             out.append(db["txt"])
     for i in range(N_SINGLE):
         value = analysis["sb"].get(i)
-        if value is not None:
+        if value is not None and value > 1e-8:
             out.append(value)
     return out
 
